@@ -1,0 +1,79 @@
+# Telrang as a systemd service (DESIGN.md §29; docs/deploy/linux.md).
+#   install -m 644 telrang.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now telrang
+# Configuration: /etc/telrang/telrang.json (root:telrang 0640) or `systemctl edit telrang` for Environment= lines.
+# Data: /var/lib/telrang (0700, the telrang user only). Program: /opt/telrang (root-owned, read-only for the service).
+# Check the sandbox with: systemd-analyze security telrang
+
+[Unit]
+Description=Telrang voting app
+Wants=network-online.target
+After=network-online.target
+# PostgreSQL on this host: add postgresql.service to After= and Wants= (systemctl edit telrang).
+
+[Service]
+Type=notify
+User=telrang
+# Primary group telrang-proxy for the socket (below); group telrang to read /etc/telrang.
+Group=telrang-proxy
+SupplementaryGroups=telrang
+ExecStart=/opt/telrang/Telrang.Web
+WorkingDirectory=/opt/telrang
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_NOLOGO=1
+# No diagnostics port (debugger, profiler, event pipe): nobody attaches to the running app.
+Environment=DOTNET_EnableDiagnostics=0
+
+# /var/lib/telrang (App:DataDir default for the service) and /etc/telrang, created by systemd with these modes.
+StateDirectory=telrang
+StateDirectoryMode=0700
+ConfigurationDirectory=telrang
+ConfigurationDirectoryMode=0750
+UMask=0077
+
+# The HTTP socket (DESIGN.md §31, pentest R3-DEP-3): /run/telrang/telrang.sock, created by the app (Urls in telrang.json)
+# with mode 0660. The service's primary group is telrang-proxy (Group= above), so /run/telrang (telrang:telrang-proxy
+# 0750) and the socket belong to it: only the reverse proxy's account (a member of telrang-proxy) can connect, and no
+# local user can take the address while the service restarts, as with a TCP port. Removed when the service stops.
+# Files the service writes elsewhere stay owner-only (UMask=0077), so the group gives the proxy nothing else.
+RuntimeDirectory=telrang
+RuntimeDirectoryMode=0750
+
+Restart=on-failure
+RestartSec=5s
+# Exit 2: unusable configuration. Restarting does not help; read `journalctl -u telrang`.
+RestartPreventExitStatus=2
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+
+# ---- Sandbox ----
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+# Not ~@resources: the .NET runtime does not start without those calls ("Failed to create CoreCLR").
+SystemCallErrorNumber=EPERM
+# MemoryDenyWriteExecute stays off: the .NET JIT writes and runs code.
+# Ports below 1024: AmbientCapabilities=CAP_NET_BIND_SERVICE and CapabilityBoundingSet=CAP_NET_BIND_SERVICE.
+
+[Install]
+WantedBy=multi-user.target

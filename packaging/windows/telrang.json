@@ -1,0 +1,26 @@
+{
+  // Telrang operator configuration (DESIGN.md section 29; docs/deploy/windows.md, "Configuration").
+  // Installed as C:\ProgramData\Telrang\telrang.json by install-service.ps1 (SYSTEM, Administrators and
+  // NT SERVICE\Telrang only). The app never writes it. Service environment variables and command-line arguments
+  // override these values. Registration, mail, display name, public URL and limits are set on the admin page.
+
+  // Behind a reverse proxy on this machine (recommended): plain HTTP on loopback, and the proxy on loopback trusted for
+  // X-Forwarded-For/-Proto. Any program on this machine can connect there too and claim any client address
+  // (docs/deploy/windows.md, "HTTPS / reverse proxy"); without a proxy on this machine, remove "ReverseProxy".
+  "Urls": "http://127.0.0.1:8080",
+  "ReverseProxy": { "KnownProxies": "127.0.0.1" },
+
+  "App": {
+    // The service's default; set here so commands run from a console (copy-to-postgres) use the same folder.
+    "DataDir": "C:\\ProgramData\\Telrang\\data"
+  }
+
+  // PostgreSQL instead of SQLite (docs/deploy/README.md, "PostgreSQL"):
+  // ,"Database": { "Provider": "Postgres" }
+  // ,"ConnectionStrings": { "Default": "Host=localhost;Database=telrang;Username=telrang;Password=..." }
+
+  // Kestrel serves HTTPS itself (no proxy): replace "Urls" above and add the certificate; open the port with
+  // install-service.ps1 -OpenFirewall -Port 8443:
+  // ,"Urls": "https://0.0.0.0:8443"
+  // ,"Kestrel": { "Certificates": { "Default": { "Path": "C:\\ProgramData\\Telrang\\cert.pfx", "Password": "..." } } }
+}

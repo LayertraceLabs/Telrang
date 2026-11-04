@@ -1,0 +1,135 @@
+# Telrang behind Nginx Proxy Manager, with PostgreSQL (DESIGN.md §32; docs/deploy/docker.md, "Nginx Proxy Manager").
+# Used alone:  docker compose -f compose.npm.yml up -d
+#
+# Before the first start:
+#  1. The network NPM and Telrang share (once per host; pick a free subnet, the command refuses an overlapping one):
+#       docker network create --subnet 172.31.255.0/29 --ip-range 172.31.255.4/30 telrang-proxy
+#     and join NPM to it with the fixed address NPM_ADDRESS below (NPM's own compose file, see the docs; --ip-range keeps
+#     .2 free when this stack starts first).
+#  2. The secrets, next to this file (random passwords, readable only by the container user that reads each file):
+#       mkdir -p secrets && (umask 077; pw=$(openssl rand -hex 32)
+#         printf '%s' "$pw" > secrets/db_app_password
+#         printf 'Host=db;Database=telrang;Username=telrang;Password=%s;Maximum Pool Size=30;GSS Encryption Mode=Disable' "$pw" > secrets/telrang_db
+#         openssl rand -hex 32 | tr -d '\n' > secrets/db_superuser_password)
+#       sudo chown 1654:1654 secrets/telrang_db && sudo chown 999:999 secrets/db_app_password secrets/db_superuser_password
+#  3. The image: `docker load` (scripts/publish-release.sh <v> --docker, then docker save | ssh <vm> docker load) or
+#     `docker build -f docker/Dockerfile -t telrang:latest .` in a checkout on the host.
+# First start: docker compose -f compose.npm.yml logs app | grep "setup key"
+#
+# The ${...:-default} values are for tests and unusual hosts; the defaults are the documented setup.
+name: telrang
+
+services:
+  app:
+    image: ${TELRANG_IMAGE:-telrang:latest}
+    # A local image (docker load / docker build): "pull" skips it instead of failing with "pull access denied"
+    # (a stack manager's "Re-pull image", e.g. Portainer). With a registry image (TELRANG_IMAGE=ghcr.io/...) set TELRANG_PULL_POLICY=always.
+    pull_policy: ${TELRANG_PULL_POLICY:-never}
+    restart: unless-stopped
+    # No "ports": only NPM reaches the app, over the telrang-proxy network.
+    networks:
+      proxy:
+        aliases: [telrang]                 # NPM forwards to http://telrang:8080
+      egress: {}                           # outbound mail (SMTP) and DNS
+      db: {}
+    volumes:
+      - app-data:/data                     # Data Protection keys (keys/, incl. emailkey), branding, backups' temp files
+    environment:
+      App__DataDir: "/data"
+      Database__Provider: "Postgres"
+      ConnectionStrings__Default_FILE: "/run/secrets/telrang_db"
+      # Forwarded headers (visitor address, https) are trusted from NPM's fixed address only, never the subnet.
+      ReverseProxy__KnownProxies: "${NPM_ADDRESS:-172.31.255.2}"
+      DOTNET_EnableDiagnostics: "0"
+    secrets:
+      - telrang_db
+    depends_on:
+      db:
+        condition: service_healthy         # the app migrates at startup
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${TELRANG_MEM_LIMIT:-2g}
+    pids_limit: 512
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  db:
+    image: postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+    restart: unless-stopped
+    # The image's postgres user from the start: no root entrypoint, so no capabilities are needed.
+    user: "999:999"
+    networks:
+      db: {}                               # internal: no way out, only the app reaches it
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
+      TELRANG_DB_PASSWORD_FILE: /run/secrets/db_app_password
+    secrets:
+      - db_superuser_password
+      - db_app_password
+    # The image's entrypoint, after writing the init script that runs once, on the first start with an empty db-data
+    # volume: Telrang's own role (no superuser) owns its database and no other role may connect to it (DESIGN.md §31,
+    # DEP-1). Written at start because the root file system is read-only (compose cannot inject a file into it).
+    entrypoint:
+      - sh
+      - -c
+      - |
+        cat >/docker-entrypoint-initdb.d/telrang.sh <<'EOF'
+        psql -v ON_ERROR_STOP=1 --username "$$POSTGRES_USER" --dbname postgres -v pw="$$(cat "$$TELRANG_DB_PASSWORD_FILE")" <<'SQL'
+        CREATE ROLE telrang LOGIN PASSWORD :'pw';
+        CREATE DATABASE telrang OWNER telrang;
+        REVOKE CONNECT, TEMP ON DATABASE telrang FROM PUBLIC;
+        SQL
+        EOF
+        exec docker-entrypoint.sh postgres
+    healthcheck:
+      # Ready for the app's role, not only the init server the entrypoint runs first.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "telrang", "-d", "telrang"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=1m,uid=999,gid=999,mode=2775
+      - /docker-entrypoint-initdb.d:size=1m,uid=999,gid=999,mode=0755
+    shm_size: 128m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${TELRANG_DB_MEM_LIMIT:-1g}
+    pids_limit: 256
+    logging: *logging
+
+networks:
+  proxy:
+    name: ${TELRANG_PROXY_NETWORK:-telrang-proxy}
+    external: true
+  egress:
+    # Fixed, so a host firewall rule can limit what the app may reach (docs: "Outbound traffic").
+    ipam:
+      config:
+        - subnet: ${TELRANG_EGRESS_SUBNET:-172.31.255.16/29}
+  db:
+    internal: true
+
+volumes:
+  app-data:
+  db-data:
+
+secrets:
+  telrang_db:
+    file: ./secrets/telrang_db               # the app's connection string
+  db_app_password:
+    file: ./secrets/db_app_password          # the same password alone, for the role the init script creates
+  db_superuser_password:
+    file: ./secrets/db_superuser_password    # the "postgres" superuser; the app never uses it

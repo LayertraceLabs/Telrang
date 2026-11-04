@@ -1,0 +1,26 @@
+{
+  // Telrang operator configuration (DESIGN.md §29; docs/deploy/linux.md, "Configuration").
+  // Install as /etc/telrang/telrang.json, owner root, group telrang, mode 0640. The app never writes it.
+  // Environment variables (systemctl edit telrang) and command-line arguments override these values.
+  // Registration, mail, display name, public URL and limits are set on the admin page, not here.
+
+  // Behind a reverse proxy on this host (recommended): plain HTTP on the Unix socket the unit prepares (/run/telrang,
+  // group telrang-proxy; docs/deploy/linux.md, "HTTPS / reverse proxy"). Its peers are trusted for X-Forwarded-*.
+  "Urls": "http://unix:/run/telrang/telrang.sock",
+
+  "App": {
+    // The service's default; set here so commands run from a shell (copy-to-postgres) use the same folder.
+    "DataDir": "/var/lib/telrang"
+  }
+
+  // PostgreSQL instead of SQLite (docs/deploy/README.md, "PostgreSQL"):
+  // ,"Database": { "Provider": "Postgres" }
+  // ,"ConnectionStrings": { "Default": "Host=localhost;Database=telrang;Username=telrang;Password=..." }
+
+  // Kestrel serves HTTPS itself (no proxy): replace "Urls" above and add the certificate (readable by the service user):
+  // ,"Urls": "http://0.0.0.0:8080;https://0.0.0.0:8443"
+  // ,"Kestrel": { "Certificates": { "Default": { "Path": "/etc/telrang/cert.pfx", "Password": "..." } } }
+  // A proxy on loopback TCP instead (every local account can then send X-Forwarded-*, see docs/deploy/security.md):
+  // ,"Urls": "http://127.0.0.1:8080"
+  // ,"ReverseProxy": { "KnownProxies": "127.0.0.1" }
+}

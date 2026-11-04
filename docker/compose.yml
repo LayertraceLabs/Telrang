@@ -1,0 +1,97 @@
+# docker compose -f docker/compose.yml up -d --build
+# See docs/deploy/docker.md for reverse-proxy and certificate setup; behind Nginx Proxy Manager with PostgreSQL:
+# compose.npm.yml.
+name: telrang
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ${TELRANG_IMAGE:-telrang:latest}
+    # A local image (docker load / docker build): "pull" skips it instead of failing with "pull access denied"
+    # (a stack manager's "Re-pull image", e.g. Portainer). With a registry image (TELRANG_IMAGE=ghcr.io/...) set TELRANG_PULL_POLICY=always.
+    pull_policy: ${TELRANG_PULL_POLICY:-never}
+    restart: unless-stopped
+    ports:
+      # Reverse-proxy mode: bind to loopback and let the proxy terminate TLS.
+      - "127.0.0.1:${TELRANG_PORT:-8080}:8080"
+      # Cert-file mode: publish 8443 instead (and uncomment the Kestrel vars below).
+      # - "443:8443"
+    volumes:
+      - app-data:/data
+    environment:
+      App__DataDir: "/data"
+      # First start: the log prints "Admin setup key: ... (valid 1 h). Open <url>/setup and enter it." Registration,
+      # mail (SMTP) and the display name are set on the admin page, not here.
+      # Who may set X-Forwarded-*: default = this container's Docker network (fine for a
+      # proxy on this host or Docker network). A proxy elsewhere: set KnownProxies/KnownNetworks;
+      # see docs/deploy/README.md.
+      # ReverseProxy__KnownNetworks: "172.30.0.0/24"
+      # ConnectionStrings__Default: "Data Source=/data/app.db"
+      DOTNET_EnableDiagnostics: "0"
+
+      # ---- PostgreSQL instead of SQLite (docs/deploy/docker.md, "PostgreSQL and moving from SQLite"; uncomment "db" and the secrets below) ----
+      # /data stays mounted: it holds the Data Protection keys and the branding images.
+      # Database__Provider: "Postgres"
+      # ConnectionStrings__Default_FILE: "/run/secrets/telrang_db"
+
+      # ---- Cert-file mode (Kestrel serves HTTPS itself) ----
+      # Put cert.pfx into the volume, then:
+      # ASPNETCORE_URLS: "http://+:8080;https://+:8443"
+      # ASPNETCORE_Kestrel__Certificates__Default__Path: "/data/cert.pfx"
+      # ASPNETCORE_Kestrel__Certificates__Default__Password: "change-me"
+      # Public HTTPS port used for HTTP->HTTPS redirects (443 if you map "443:8443"):
+      # ASPNETCORE_HTTPS_PORT: "443"
+      # No proxy in front, so trust no forwarded headers from the network:
+      # ReverseProxy__KnownProxies: "127.0.0.1"
+    # Hardening (DESIGN.md §32): nothing outside /data and /tmp is writable, no capabilities, no privilege gain, bounded
+    # memory, processes and logs. DOTNET_EnableDiagnostics=0 (also set by the image): no debugger/profiler IPC.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    pids_limit: 512
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # PostgreSQL (with the two variables above):
+    # secrets:
+    #   - telrang_db
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+
+  # PostgreSQL instead of SQLite (docs/deploy/docker.md, "PostgreSQL and moving from SQLite"). Still one app container. Move existing data with
+  # the app stopped: docker compose run --rm app copy-to-postgres --from /data/app.db
+  # db:
+  #   image: postgres:17
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: telrang
+  #     POSTGRES_USER: telrang
+  #     POSTGRES_PASSWORD_FILE: /run/secrets/telrang_db_password
+  #   secrets:
+  #     - telrang_db_password
+  #   volumes:
+  #     - db-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U telrang -d telrang"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
+
+# secrets:
+#   telrang_db:
+#     file: ./secrets/telrang_db               # Host=db;Database=telrang;Username=telrang;Password=...
+#   telrang_db_password:
+#     file: ./secrets/telrang_db_password      # the same password, alone
+
+volumes:
+  app-data:
+  # db-data:
