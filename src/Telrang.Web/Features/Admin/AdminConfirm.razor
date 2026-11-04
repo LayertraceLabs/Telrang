@@ -1,0 +1,34 @@
+@* Confirm panel for a consequential admin action: tick box with the consequence, then the action button. *@
+<div class="confirm-panel mt-2">
+    <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="@Id" @bind="isChecked" />
+        <label class="form-check-label" for="@Id">@Text</label>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-2">
+        <button type="button" class="btn btn-sm @(Danger ? "btn-danger" : "btn-primary")" disabled="@(!isChecked || Busy)" @onclick="OnConfirm">@Action</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OnCancel">Cancel</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>Checkbox id; unique per panel on the page.</summary>
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+    /// <summary>The consequence, as the tick box label.</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+    /// <summary>Button text (a verb).</summary>
+    [Parameter, EditorRequired] public string Action { get; set; } = "";
+    [Parameter] public bool Danger { get; set; } = true;
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool isChecked;
+    private string? shownFor;
+
+    protected override void OnParametersSet()
+    {
+        // A panel reused for another account or action starts unticked.
+        if (shownFor != Id + "|" + Action) isChecked = false;
+        shownFor = Id + "|" + Action;
+    }
+}

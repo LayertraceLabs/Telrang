@@ -1,0 +1,173 @@
+@* The three views of a dates poll (DESIGN.md §18.2), shared by DatesVote, DatesResultsView and the editor preview: a
+   "Calendar · List · Timeline" switcher and the three layouts, each rendering the caller's Cell fragment per option.
+   Default: the switcher is three radio inputs styled as segmented buttons; CSS shows the checked view (no script).
+   Inside the vote form (FormView set, DESIGN.md §21.1) the switcher is three submit buttons named "view" that re-render
+   with the posted answers and save nothing; the other panels are rendered hidden and dates.js switches client-side.
+   The choice is not persisted. *@
+
+<div class="@(FormView is null ? "dates-views" : "dates-views dates-views-form")" data-dates-views>
+    @if (Preview && FormView is { } previewView)
+    {
+        @* The home page example: plain buttons, shown by dates.js (without JS only the first view is there). *@
+        <div class="dates-switch" role="group" aria-label="View" data-view-switch hidden>
+            @foreach (var v in AllViews)
+            {
+                <button type="button" class="dates-switch-btn dates-switch-@Css(v) @(v == previewView ? "active" : "")"
+                        aria-pressed="@(v == previewView ? "true" : "false")" data-view="@Css(v)"><Icon Name="@IconOf(v)" /> @v</button>
+            }
+        </div>
+    }
+    else if (FormView is { } shown)
+    {
+        <div class="dates-switch" role="group" aria-label="View">
+            @foreach (var v in AllViews)
+            {
+                <button type="submit" class="dates-switch-btn dates-switch-@Css(v) @(v == shown ? "active" : "")" name="@BallotForm.ViewField"
+                        value="@Css(v)" formnovalidate aria-pressed="@(v == shown ? "true" : "false")" data-view="@Css(v)"><Icon Name="@IconOf(v)" /> @v</button>
+            }
+        </div>
+    }
+    else
+    {
+        @foreach (var v in AllViews)
+        {
+            <input type="radio" class="dates-view-input dates-view-input-@Css(v)" name="@uid" id="@uid-@Css(v)" checked="@(v == Initial)" />
+        }
+        <div class="dates-switch" role="group" aria-label="View">
+            @foreach (var v in AllViews)
+            {
+                <label class="dates-switch-btn dates-switch-@Css(v)" for="@uid-@Css(v)"><Icon Name="@IconOf(v)" /> @v</label>
+            }
+        </div>
+    }
+
+    <div class="dates-panel dates-calendar" data-panel="calendar" hidden="@Hidden(DatesView.Calendar)">
+        @foreach (var month in Months)
+        {
+            <table class="dates-month" @key="month">
+                <caption>@DatesFormat.MonthName(month.Year, month.Month)</caption>
+                <thead>
+                    <tr>
+                        @foreach (var w in DatesFormat.WeekdayShort)
+                        {
+                            <th scope="col">@w</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var week in DatesFormat.Weeks(month.Year, month.Month))
+                    {
+                        <tr>
+                            @foreach (var day in week)
+                            {
+                                if (day is not { } date)
+                                {
+                                    <td class="dates-day dates-day-out"></td>
+                                    continue;
+                                }
+                                var slots = byDate.GetValueOrDefault(date);
+                                if (slots is null)
+                                {
+                                    <td class="dates-day"><span class="dates-day-num">@date.Day</span></td>
+                                    continue;
+                                }
+                                <td class="dates-day dates-day-has">
+                                    @if (slots.All(s => s.Start is not null))
+                                    {
+                                        <span class="dates-day-num">@date.Day</span>
+                                    }
+                                    <div class="dates-slots">
+                                        @foreach (var o in slots)
+                                        {
+                                            @Cell(new DatesSlot(o, DatesView.Calendar))
+                                        }
+                                    </div>
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <ul class="dates-panel dates-list list-group" data-panel="list" hidden="@Hidden(DatesView.List)">
+        @foreach (var o in Options)
+        {
+            <li class="list-group-item dates-list-row" @key="o.Key">
+                <div class="dates-list-text">
+                    <span class="fw-semibold text-break">@DatesFormat.LongLabel(o)</span>
+                    @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
+                    {
+                        <div class="poll-markdown small text-secondary mt-1">@MarkdownRenderer.Render(o.DescriptionMarkdown)</div>
+                    }
+                </div>
+                <div class="dates-list-cell">@Cell(new DatesSlot(o, DatesView.List))</div>
+            </li>
+        }
+    </ul>
+
+    <div class="dates-panel dates-timeline" role="region" aria-label="Timeline" tabindex="0" data-panel="timeline" hidden="@Hidden(DatesView.Timeline)">
+        <ol class="dates-tl-track">
+            @{ DateOnly? previous = null; }
+            @foreach (var (date, slots) in byDate)
+            {
+                var newMonth = previous is not { } p || p.Month != date.Month || p.Year != date.Year;
+                previous = date;
+                <li class="dates-tl-col @(newMonth ? "dates-tl-col-month" : "")" @key="date">
+                    <span class="dates-tl-month">@(newMonth ? DatesFormat.MonthShort(date) : "")</span>
+                    <span class="dates-tl-day"><span class="dates-tl-weekday">@DatesFormat.WeekdayShort[DatesFormat.MondayIndex(date)]</span> @date.Day</span>
+                    <div class="dates-slots">
+                        @foreach (var o in slots)
+                        {
+                            @Cell(new DatesSlot(o, DatesView.Timeline))
+                        }
+                    </div>
+                </li>
+            }
+        </ol>
+    </div>
+</div>
+
+@code {
+    /// <summary>The poll's options in their (chronological) order.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<PollOption> Options { get; set; } = [];
+    /// <summary>Renders one option in one view (a <see cref="DatesCell"/> when voting, counts in results).</summary>
+    [Parameter, EditorRequired] public RenderFragment<DatesSlot> Cell { get; set; } = default!;
+    /// <summary>The view shown first (default Calendar).</summary>
+    [Parameter] public DatesView Initial { get; set; } = DatesView.Calendar;
+    /// <summary>Inside the vote form: the view shown; the switcher becomes submit buttons (see above).</summary>
+    [Parameter] public DatesView? FormView { get; set; }
+    /// <summary>With <see cref="FormView"/>: the home page example, no form; the switcher is plain buttons (dates.js).</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    private bool Hidden(DatesView v) => FormView is { } shown && shown != v;
+
+    private static readonly DatesView[] AllViews = [DatesView.Calendar, DatesView.List, DatesView.Timeline];
+    private static int counter;
+    private readonly string uid = "dv" + Interlocked.Increment(ref counter).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private SortedDictionary<DateOnly, List<PollOption>> byDate = new();
+    private List<(int Year, int Month)> Months = [];
+
+    protected override void OnParametersSet()
+    {
+        byDate = new SortedDictionary<DateOnly, List<PollOption>>();
+        foreach (var o in Options)
+        {
+            if (o.Date is not { } d) continue;
+            if (!byDate.TryGetValue(d, out var list)) byDate[d] = list = [];
+            list.Add(o);
+        }
+        Months = byDate.Keys.Select(d => (d.Year, d.Month)).Distinct().ToList();
+    }
+
+    private static string Css(DatesView v) => BallotForm.ViewValue(v);
+
+    private static string IconOf(DatesView v) => v switch
+    {
+        DatesView.Calendar => "calendar",
+        DatesView.List => "list",
+        _ => "timeline",
+    };
+}

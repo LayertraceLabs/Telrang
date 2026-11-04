@@ -1,0 +1,115 @@
+@page "/setup"
+@layout PublicLayout
+@* Reachable while the account gate is up (AccountGate). *@
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject AccountService Accounts
+@inject SetupKey SetupKey
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager Nav
+@inject IServiceScopeFactory ScopeFactory
+
+<PageTitle>Setup</PageTitle>
+
+@if (available)
+{
+    <h1>Create admin account</h1>
+    <div class="row">
+        <div class="col-12 col-md-8 col-lg-6">
+            @if (error is not null)
+            {
+                <div class="alert alert-danger" role="alert">@error</div>
+            }
+            <EditForm Model="Input" method="post" OnValidSubmit="CreateAsync" FormName="setup-admin">
+                <DataAnnotationsValidator />
+                <FormGuardFields />
+                <ValidationSummary class="text-danger" role="alert" />
+                <div class="form-floating mb-3">
+                    <InputText @bind-Value="Input.Key" id="Input.Key" class="form-control font-monospace" autocomplete="off" spellcheck="false" placeholder="key" />
+                    <label for="Input.Key">Setup key (from the server log)</label>
+                </div>
+                <div class="form-floating mb-3">
+                    <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control" autocomplete="username" placeholder="name@example.com" />
+                    <label for="Input.Email">Email</label>
+                </div>
+                <div class="form-floating mb-3">
+                    <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="form-control" autocomplete="new-password" placeholder="password" />
+                    <label for="Input.Password">Password (12+ characters)</label>
+                </div>
+                <div class="form-floating mb-3">
+                    <InputText type="password" @bind-Value="Input.ConfirmPassword" id="Input.ConfirmPassword" class="form-control" autocomplete="new-password" placeholder="password" />
+                    <label for="Input.ConfirmPassword">Confirm password</label>
+                </div>
+                <button type="submit" class="w-100 btn btn-lg btn-primary">Create</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [CascadingParameter]
+    private HttpContext Http { get; set; } = default!;
+
+    private bool available;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        // 404 once an admin exists or when no key is live (restart the server for a new one).
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var adminExists = await AdminBootstrapper.AdminExistsAsync(db);
+        available = SetupKey.IsLive && !adminExists;
+        if (adminExists)
+        {
+            Nav.NotFound();
+        }
+        else if (!available)
+        {
+            // No admin yet but the key is gone (1 h): the 404 page says how to get a new one.
+            Telrang.Web.Components.Pages.NotFound.SetHint(Http, "The setup key expired. Restart the server for a new key; it is printed to the log.");
+            Nav.NotFound();
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (!available) return;
+        var outcome = await Accounts.CreateFirstAdminAsync(Input.Key, Input.Email, Input.Password);
+        switch (outcome.Status)
+        {
+            case AdminSetupStatus.Ok:
+                await SignInManager.SignInAsync(outcome.User!, isPersistent: false);
+                // The session is gated until an authenticator app is enrolled (AccountGate).
+                Nav.NavigateTo(AccountGate.EnrolPath);
+                return;
+            case AdminSetupStatus.NotFound:
+                Nav.NotFound();
+                return;
+            default:
+                error = outcome.Error;
+                return;
+        }
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        public string Key { get; set; } = "";
+
+        [Required, EmailAddress]
+        public string Email { get; set; } = "";
+
+        [Required, StringLength(256, MinimumLength = 12, ErrorMessage = "The password must be at least {2} characters long.")]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+
+        [Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
+        [DataType(DataType.Password)]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

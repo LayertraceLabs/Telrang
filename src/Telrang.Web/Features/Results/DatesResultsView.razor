@@ -1,0 +1,84 @@
+@using Telrang.Core.Ballots
+@using Telrang.Core.Scoring
+@* Dates results (DESIGN.md §18.3): the best date(s), then the same three views as voting with read-only counts
+   (list view: a stacked yes / maybe / no bar as inline SVG with width attributes; the CSP forbids style
+   attributes). Best dates take the highlight like bar-fill-lead. The "Who can when" grid is DatesGridView, on the
+   ballots view (DESIGN.md §33). *@
+
+@if (Best.Count > 0)
+{
+    <p class="dates-best-line">
+        <span class="fw-semibold">Best: </span>
+        @for (var i = 0; i < Best.Count; i++)
+        {
+            var row = Best[i];
+            <span class="dates-best-item">@(i > 0 ? "; " : "")@DatesFormat.LongLabel(OptionOf(row)) · @Counts(row)</span>
+        }
+    </p>
+}
+
+<DatesViews Options="Definition.Questions[0].Options">
+    <Cell>
+        @{
+            var row = rows.GetValueOrDefault(context.Option.Key);
+            var best = row is not null && IsBest(row);
+        }
+        @if (row is null)
+        {
+        }
+        else if (context.View == DatesView.List)
+        {
+            <div class="dates-result-list @(best ? "dates-best" : "")" data-place="@row.Place">
+                @if (best)
+                {
+                    <span class="badge dates-best-badge">Best</span>
+                }
+                <svg class="bar dates-stack" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+                    <rect class="bar-track" x="0" y="0" width="100" height="6" />
+                    <rect class="dates-stack-yes" x="0" y="0" width="@Pct(row.Yes)" height="6" />
+                    <rect class="dates-stack-maybe" x="@Pct(row.Yes)" y="0" width="@Pct(row.Maybe)" height="6" />
+                </svg>
+                <span class="small text-nowrap dates-result-numbers">@row.Yes yes@(Definition.Questions[0].Maybe || row.Maybe > 0 ? $" · {row.Maybe} maybe" : "") · @row.No no</span>
+            </div>
+        }
+        else
+        {
+            <span class="dates-result @(best ? "dates-best" : "")" data-place="@row.Place">
+                <span class="dates-cell-label" aria-hidden="true">@DatesFormat.SlotLabel(context.Option)</span>
+                <span class="dates-result-counts" aria-hidden="true">
+                    <span class="dates-count-yes"><Icon Name="check" />@row.Yes</span>
+                    @if (Definition.Questions[0].Maybe || row.Maybe > 0)
+                    {
+                        <span class="dates-count-maybe"><Icon Name="question" />@row.Maybe</span>
+                    }
+                </span>
+                <span class="visually-hidden">@DatesFormat.LongLabel(context.Option): @Counts(row)@(best ? ", best" : "")</span>
+            </span>
+        }
+    </Cell>
+</DatesViews>
+
+@code {
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public DatesResultSet Results { get; set; } = default!;
+    private Dictionary<string, DatesResultRow> rows = new(StringComparer.Ordinal);
+    private List<DatesResultRow> Best = [];
+
+    protected override void OnParametersSet()
+    {
+        rows = Results.Rows.ToDictionary(r => r.Key, StringComparer.Ordinal);
+        Best = Results.Rows.Where(IsBest).ToList();
+    }
+
+    /// <summary>First place, once someone said yes or maybe to it (with no answers every date ties for first).</summary>
+    private static bool IsBest(DatesResultRow r) => r.Place == 1 && r.Yes + r.Maybe > 0;
+
+    private PollOption OptionOf(DatesResultRow r) =>
+        Definition.Questions[0].Options.FirstOrDefault(o => o.Key == r.Key) ?? new PollOption(r.Key, r.Label, "");
+
+    private string Counts(DatesResultRow r) =>
+        Definition.Questions[0].Maybe || r.Maybe > 0 ? $"{r.Yes} yes, {r.Maybe} maybe" : $"{r.Yes} yes";
+
+    private string Pct(int count) =>
+        (Results.VoterCount == 0 ? 0 : count * 100.0 / Results.VoterCount).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+}

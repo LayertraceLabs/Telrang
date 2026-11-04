@@ -1,0 +1,71 @@
+@* The vote page's "after submit" view (static, inside the delete form; DESIGN.md §21.1): the visitor's ballot
+   (responses: one) or the list of their responses (responses: many). Changing goes to ?r=N&edit=1, adding to ?new=1. *@
+@{ var def = Access.Definition; }
+@if (Errors.Count > 0)
+{
+    <div class="alert alert-danger" role="alert">@string.Join(" ", Errors)</div>
+}
+@if (def.Responses == ResponsePolicy.Many)
+{
+    @if (JustSubmitted)
+    {
+        <div class="alert alert-success" role="status"><strong>@SavedText(def)</strong></div>
+    }
+    <ResponseList EncodedId="@Access.EncodedId" Definition="def" Responses="Responses" ZoneId="@ZoneId"
+                  Editable="Access.CanVote" Confirming="Confirming" />
+    <div class="d-flex flex-wrap gap-2">
+        @if (Access.CanVote)
+        {
+            <a class="btn btn-primary btn-lg" href="p/@Access.EncodedId?new=1" data-enhance-nav="false">Add another response</a>
+        }
+        @if (Access.CanSeeResults)
+        {
+            <a class="btn btn-outline-primary btn-lg" href="p/@Access.EncodedId/results" data-enhance-nav="false">See results</a>
+        }
+    </div>
+}
+else
+{
+    var mine = Responses[0];
+    <div class="alert alert-success" role="status"><strong>@(JustSubmitted ? SavedText(def) : "You have already voted.")</strong></div>
+    <h2 class="h5">@Heading</h2>
+    <BallotView Definition="def" Ballot="mine" />
+    <p class="small text-secondary">@(mine.DisplayName is { } n ? n + " · " : "")@PollTime.Format(mine.UpdatedAt, ZoneId)</p>
+    <div class="d-flex flex-wrap gap-2">
+        @if (Access.CanVote)
+        {
+            <a class="btn btn-primary btn-lg" href="@($"p/{Access.EncodedId}?r={mine.ResponseNo}&edit=1")" data-enhance-nav="false">Change ballot</a>
+        }
+        @if (Access.CanSeeResults)
+        {
+            <a class="btn btn-outline-primary btn-lg" href="p/@Access.EncodedId/results" data-enhance-nav="false">See results</a>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public PollAccess Access { get; set; } = default!;
+    [Parameter, EditorRequired] public IReadOnlyList<MyBallot> Responses { get; set; } = [];
+    [Parameter] public bool JustSubmitted { get; set; }
+    [Parameter] public string? ZoneId { get; set; }
+    [Parameter] public string Heading { get; set; } = "Your ballot";
+    [Parameter] public IReadOnlyList<string> Errors { get; set; } = [];
+    /// <summary>The response whose delete is being confirmed (responses: many).</summary>
+    [Parameter] public int? Confirming { get; set; }
+
+    public static string SubmitLabel(PollDefinition def, bool editingExisting) =>
+        def.Responses == ResponsePolicy.Many
+            ? editingExisting ? "Update response" : "Submit response"
+            : editingExisting ? "Update ballot" : "Submit ballot";
+
+    public static string SavedText(PollDefinition def) =>
+        def.Responses == ResponsePolicy.Many ? "Response saved." : "Your ballot was saved.";
+
+    public static string HeadingFor(PollType type) => type switch
+    {
+        PollType.Ranked => "Your ranking",
+        PollType.Points => "Your points",
+        PollType.Dates => "Your availability",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
+    };
+}

@@ -1,0 +1,114 @@
+@page "/admin"
+@layout MainLayout
+@attribute [Authorize(Policy = AppPolicies.Admin)]
+@inject IServiceScopeFactory ScopeFactory
+@inject IOptions<AppOptions> AppOptions
+@inject Telrang.Web.Features.Branding.ThemeService Theme
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Admin - @AppOptions.Value.Name</PageTitle>
+
+<PageHeader Title="Admin">
+    @if (stats is { } s)
+    {
+        <p class="text-secondary small">@s.Users @(s.Users == 1 ? "user" : "users") · @s.Polls @(s.Polls == 1 ? "poll" : "polls") (@s.OpenPolls open) · @s.Ballots @(s.Ballots == 1 ? "ballot" : "ballots")</p>
+    }
+</PageHeader>
+
+<div class="admin-tabs-row mb-3">
+<ul class="nav nav-tabs admin-tabs">
+    @foreach (var (key, label) in Tabs)
+    {
+        <li class="nav-item">
+            <a class="nav-link @(CurrentTab == key ? "active" : "")" aria-current="@(CurrentTab == key ? "page" : null)" href="@(key == "users" ? "admin" : "admin?tab=" + key)">@label</a>
+        </li>
+    }
+</ul>
+<HelpAllButton State="help" CssClass="admin-help-all" Changed="StateHasChanged" />
+</div>
+
+<CascadingValue Value="help">
+
+@if (CurrentTab == "polls")
+{
+    <AdminPolls />
+}
+else if (CurrentTab == "settings")
+{
+    <AdminSettings />
+}
+else if (CurrentTab == "mail")
+{
+    <AdminMail />
+}
+else if (CurrentTab == "abuse")
+{
+    <AdminAbuse />
+}
+else if (CurrentTab == "status")
+{
+    <AdminStatusTab />
+}
+else if (CurrentTab == "log")
+{
+    <AdminLogTab />
+}
+else
+{
+    <AdminUsers />
+}
+</CascadingValue>
+
+@code {
+    private static readonly (string Key, string Label)[] Tabs =
+        [("users", "Users"), ("polls", "Polls"), ("settings", "Settings"), ("mail", "Mail"), ("abuse", "Abuse"), ("status", "Status"), ("log", "Log")];
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "tab")]
+    private string? Tab { get; set; }
+
+    private string CurrentTab => Tabs.Any(t => string.Equals(t.Key, Tab, StringComparison.OrdinalIgnoreCase)) ? Tab!.ToLowerInvariant() : "users";
+
+    private AdminStats? stats;
+
+    private IJSObjectReference? themeModule;
+    private readonly HelpState help = new(HelpState.Admin);
+
+    /// <summary>
+    /// A full load of /admin already links the admin stylesheet (App.razor); after in-app navigation the public
+    /// one (with the custom CSS) is still linked, so swap it here and back when leaving.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            themeModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/theme.js");
+            await themeModule.InvokeVoidAsync("apply", Theme.AdminUrl, Theme.Settings.BootstrapTheme);
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { } // theme.js failed (DESIGN.md §23.1): the stylesheet swaps on the next full load
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (themeModule is null) return;
+        try
+        {
+            await themeModule.InvokeVoidAsync("apply", Theme.Url, Theme.Settings.BootstrapTheme);
+            await themeModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var caller = (await AuthState).User;
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        stats = await scope.ServiceProvider.GetRequiredService<AdminService>().GetStatsAsync(caller);
+    }
+}

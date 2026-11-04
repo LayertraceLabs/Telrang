@@ -1,0 +1,469 @@
+@page "/p/{Id}"
+@layout MainLayout
+@attribute [ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.Mvc.RequestSizeLimit(VoteFormLimits.MaxBodyBytes)]
+@attribute [Microsoft.AspNetCore.Mvc.RequestFormLimits(ValueCountLimit = VoteFormLimits.MaxValues, ValueLengthLimit = VoteFormLimits.MaxValueLength)]
+@* Static SSR, no circuit (DESIGN.md §21.1): this page reads and sets the voter cookies (invite token, vk) and the
+   ballot is a plain form posted back here (named forms "vote" and "delete", post/redirect/get). The identity comes
+   from the request's cookies on every request, never from the form; a form rendered for someone else fails
+   antiforgery (claim binding) before it gets here. JS modules (js/vote.js) only enhance the fields. *@
+@inject IOptions<AppOptions> AppOptions
+@inject PollAccessService AccessService
+@inject BallotService Ballots
+@inject PollService Polls
+@inject PollCookies Cookies
+@inject UserManager<ApplicationUser> Users
+@inject SettingsService Settings
+@inject NavigationManager Nav
+
+@if (access is { } a)
+{
+    <PageTitle>@a.Definition.Title - @AppOptions.Value.Name</PageTitle>
+
+    var d = a.Definition;
+    var q = d.Questions[0];
+    <h1 class="text-break mb-1">@d.Title</h1>
+    <PollRules Definition="d" IsClosed="a.IsClosed" ClosesAt="a.Poll.ClosesAt" AutoClose="a.Poll.AutoClose" ZoneId="@zone" />
+    @if (a.IsOwner)
+    {
+        <p class="small"><span class="badge text-bg-info">Your poll</span>
+            <a href="polls/@a.EncodedId/edit">Edit</a> · <a href="polls/@a.EncodedId/share">Share</a> · <a href="polls/new?from=@a.EncodedId">Copy</a></p>
+    }
+    @if (!string.IsNullOrWhiteSpace(d.DescriptionMarkdown))
+    {
+        <div class="poll-markdown mb-3">@MarkdownRenderer.Render(d.DescriptionMarkdown)</div>
+    }
+    <ChangeLog Log="changes" ZoneId="@zone" ShowCounts="a.CanSeeResults" />
+
+    @if (a.CanVote || isPost)
+    {
+        <HeadContent><script type="module" src="@Assets["js/vote.js"]"></script></HeadContent>
+        @if (captchaKey is not null && !showSummary)
+        {
+            @* The provider script carries the CSP nonce; the CSP lists the provider only while a captcha is on. *@
+            <script src="@CaptchaProviders.ScriptUrl(Settings.Current.Captcha.Provider)" nonce="@Http.GetCspNonce()" async defer></script>
+        }
+        @if (showSummary)
+        {
+            <form method="post" action="@FormAction" @formname="@DeleteForm" @onsubmit="DeleteAsync" class="vote-summary">
+                <AntiforgeryToken />
+                <VoteSummary Access="a" Responses="responses" JustSubmitted="justSaved" ZoneId="@zone" Heading="@VoteSummary.HeadingFor(q.Type)"
+                             Errors="summaryErrors" Confirming="confirming" />
+            </form>
+            @if (isPost)
+            {
+                @* Both named forms exist on every POST render, so the framework never answers "no form named …". *@
+                <form method="post" action="@FormAction" @formname="@VoteForm" @onsubmit="VoteAsync" hidden></form>
+            }
+        }
+        else
+        {
+            <form method="post" action="@FormAction" @formname="@VoteForm" @onsubmit="VoteAsync" class="vote-form" data-vote-form>
+                <AntiforgeryToken />
+                @if (q.Type == PollType.Dates)
+                {
+                    @* Enter in the name field saves; without this the first submit button would be a layout switch. *@
+                    <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true">@SubmitLabel</button>
+                }
+                <input type="hidden" name="@BallotForm.FormIdField" value="@formId" />
+                @if (editing is int n)
+                {
+                    <input type="hidden" name="@BallotForm.ResponseField" value="@n" />
+                }
+                @switch (q.Type)
+                {
+                    case PollType.Ranked:
+                        <RankedVote Question="q" Values="values" />
+                        break;
+                    case PollType.Points:
+                        <PointsVote Question="q" Values="values" />
+                        break;
+                    case PollType.Dates:
+                        <DatesVote Question="q" Values="values" />
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Unknown poll type {q.Type}.");
+                }
+
+                @if (d.Names != NamesMode.None)
+                {
+                    <div class="mb-3">
+                        <label for="voter-name" class="form-label">Your name @(d.Names == NamesMode.Required ? "" : "(optional)")</label>
+                        <input id="voter-name" name="@BallotForm.NameField" class="form-control form-control-lg" maxlength="@Ballots.MaxNameLength"
+                               autocomplete="name" required="@(d.Names == NamesMode.Required)" value="@values.Name" />
+                    </div>
+                }
+                @if (canNotify)
+                {
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="notify-close" name="@BallotForm.NotifyField" value="1" checked="@values.Notify" />
+                        <label class="form-check-label" for="notify-close">Email me when this poll closes</label>
+                    </div>
+                }
+
+                <FormGuardFields />
+                @if (captchaKey is not null)
+                {
+                    <CaptchaWidget Provider="Settings.Current.Captcha.Provider" SiteKey="@captchaKey" />
+                }
+
+                @if (errors.Count > 0)
+                {
+                    <div class="alert alert-danger" role="alert" id="vote-errors">
+                        <ul class="mb-0">
+                            @foreach (var e in errors)
+                            {
+                                <li>@e</li>
+                            }
+                        </ul>
+                    </div>
+                }
+
+                <div class="vote-submit-bar @BarClass(q.Type)">
+                    @switch (q.Type)
+                    {
+                        case PollType.Ranked:
+                            <span class="small submit-summary" data-tally>@RankedVote.Tally(q, values)</span>
+                            break;
+                        case PollType.Points:
+                            @PointsVote.Tally(q, values)
+                            break;
+                        case PollType.Dates:
+                            <span class="dates-tally" aria-live="polite" aria-atomic="true" data-tally>@DatesVote.Tally(q, values)</span>
+                            break;
+                        default:
+                            throw new InvalidOperationException($"Unknown poll type {q.Type}.");
+                    }
+                    @if (responses.Count > 0)
+                    {
+                        <a class="btn btn-link" href="p/@a.EncodedId" data-enhance-nav="false">Cancel</a>
+                    }
+                    @if (a.CanVote)
+                    {
+                        <button type="submit" class="btn btn-primary btn-lg" data-submit>@SubmitLabel</button>
+                    }
+                </div>
+            </form>
+            @if (isPost)
+            {
+                <form method="post" action="@FormAction" @formname="@DeleteForm" @onsubmit="DeleteAsync" hidden></form>
+            }
+        }
+        @if (a.Voter is { Kind: VoterKind.Cookie })
+        {
+            <p class="small text-secondary mt-3 mb-0 cookie-line">Editable in this browser only
+                @if (Settings.Current.LegalPageMarkdown is not null)
+                {
+                    <text>(<a href="about">cookie</a>)</text>
+                }
+                else
+                {
+                    <text>(cookie)</text>
+                }
+            </p>
+        }
+    }
+    else if (a.IsClosed && own is { Count: > 0 })
+    {
+        <div class="alert alert-secondary" role="status">Poll closed.</div>
+        @if (d.Responses == ResponsePolicy.Many)
+        {
+            <ResponseList EncodedId="@a.EncodedId" Definition="d" Responses="own" ZoneId="@zone" ShowBallots="true" />
+        }
+        else
+        {
+            var mine = own[0];
+            <h2 class="h5">Your ballot</h2>
+            <BallotView Definition="d" Ballot="mine" />
+            <p class="small text-secondary">@(mine.DisplayName is { } n ? n + " · " : "")@PollTime.Format(mine.UpdatedAt, zone)</p>
+        }
+        @if (a.CanSeeResults)
+        {
+            <p class="mt-3"><a class="btn btn-outline-primary" href="p/@a.EncodedId/results" data-enhance-nav="false">See results</a></p>
+        }
+    }
+    else
+    {
+        @switch (a.Denial)
+        {
+            case AccessDenial.NoVoterIdentity:
+                <div class="alert alert-info" role="status">@a.ReasonIfDenied <a class="alert-link" href="p/@a.EncodedId" data-enhance-nav="false">Reload</a></div>
+                break;
+            case AccessDenial.SignInRequired:
+            case AccessDenial.InviteClaimed when !signedIn:
+                <div class="alert alert-info d-flex flex-wrap align-items-center gap-2" role="status">
+                    <span class="me-auto">@a.ReasonIfDenied</span>
+                    <a class="btn btn-primary" href="@LoginUrl(a.EncodedId)" data-enhance-nav="false">Sign in</a>
+                </div>
+                break;
+            case AccessDenial.EmailNotVerified:
+                <div class="alert alert-info" role="status">@a.ReasonIfDenied <a class="alert-link" href="Account/Manage/Email" data-enhance-nav="false">Verify email</a></div>
+                break;
+            default:
+                @if (a.ReasonIfDenied is { } reason)
+                {
+                    <div class="alert alert-info" role="status">@reason</div>
+                }
+                break;
+        }
+        <OptionList Options="d.Questions[0].Options" />
+        @if (a.CanSeeResults)
+        {
+            <p class="mt-3"><a class="btn btn-outline-primary" href="p/@a.EncodedId/results" data-enhance-nav="false">See results</a></p>
+        }
+    }
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "t")] private string? InviteToken { get; set; }
+    [SupplyParameterFromQuery(Name = CookieCheckQuery)] private string? CookieCheck { get; set; }
+    /// <summary><c>?r=N&amp;edit=1</c>: change response N (<c>responses: many</c>).</summary>
+    [SupplyParameterFromQuery(Name = ResponseQuery)] private string? ResponseParam { get; set; }
+    /// <summary><c>?edit=1</c>: the editor instead of the summary.</summary>
+    [SupplyParameterFromQuery(Name = "edit")] private string? EditParam { get; set; }
+    /// <summary><c>?new=1</c>: add another response (<c>responses: many</c>).</summary>
+    [SupplyParameterFromQuery(Name = "new")] private string? NewParam { get; set; }
+    /// <summary><c>?saved=1</c>: the summary with the "saved" status line (after the post/redirect/get).</summary>
+    [SupplyParameterFromQuery(Name = "saved")] private string? SavedParam { get; set; }
+
+    /// <summary>Marker on the one redirect that proves the vk cookie comes back from the browser.</summary>
+    public const string CookieCheckQuery = "ck";
+    public const string ResponseQuery = "r";
+    public const string VoteForm = "vote", DeleteForm = "delete";
+    public const string NoCookieMessage = "Cookies are required to vote. Reload the page.";
+
+    private PollAccess? access;
+    private VisitorContext visitor = VisitorContext.ForUser(null);
+    private bool isPost, signedIn, canNotify;
+    private string? captchaKey;
+    private string zone = PollTime.Utc;
+    private IReadOnlyList<MyBallot>? own;
+    private IReadOnlyList<MyBallot> responses = [];
+    private ChangeLogPage changes = ChangeLogPage.Empty;
+
+    // What the vote area shows.
+    private bool showSummary, justSaved;
+    /// <summary>The response being edited; null = a new one.</summary>
+    private int? editing;
+    private int? confirming;
+    private BallotForm values = new();
+    private List<string> errors = [], summaryErrors = [];
+    private readonly string formId = VoteFormIds.Create();
+
+    private string FormAction => "p/" + (access?.EncodedId ?? Id);
+    private string SubmitLabel => VoteSummary.SubmitLabel(access!.Definition, editing is int n && responses.Any(r => r.ResponseNo == n));
+    private static string BarClass(PollType t) => t switch
+    {
+        PollType.Ranked => "",
+        PollType.Points => "points-bar",
+        PollType.Dates => "dates-bar",
+        _ => throw new ArgumentOutOfRangeException(nameof(t), t, null),
+    };
+
+    private static int? PositiveInt(string? s) =>
+        int.TryParse(s, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n)
+        && n is > 0 and < 1_000_000 ? n : null;
+
+    private static bool Flag(string? s) => s is not null;
+
+    private static string LoginUrl(string encodedId) => "Account/Login?ReturnUrl=" + Uri.EscapeDataString("/p/" + encodedId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Telrang.Core.Ids.PollId.TryDecode(Id, out var pollId)) { Nav.NotFound(); return; }
+        var userId = Users.GetUserId(Http.User);
+        visitor = Cookies.Read(Http, pollId, userId);
+        isPost = HttpMethods.IsPost(Http.Request.Method);
+
+        // A POST has its own branch (DESIGN.md §21.1): no ?t= / ?ck handling, never mints or rotates vk, no redirect but
+        // the post/redirect/get after a save. The identity is the request's, exactly as on GET.
+        if (!isPost && InviteToken is not null)
+        {
+            // ?t=<token>: validate, remember it in a per-poll cookie, then redirect to the clean URL.
+            if (!InviteTokens.TryHash(InviteToken, out var hash)) { Nav.NotFound(); return; }
+            var withToken = await AccessService.GetAsync(Id, visitor with { InviteTokenHash = hash }, Http.RequestAborted);
+            if (withToken is null) { Nav.NotFound(); return; }
+            if (withToken.Poll.VoterMode == VoterMode.Invite)
+            {
+                // A token the poll does not know is a 404. An account that claimed its invitation needs no cookie
+                // (DESIGN.md §16); everyone else keeps the token in one, including a claimed token presented by
+                // someone else (the page then says whose it is).
+                if (withToken.Denial == AccessDenial.InviteUnknown) { Nav.NotFound(); return; }
+                if (withToken.Voter is { Kind: VoterKind.Account }) PollCookies.ForgetInvite(Http, withToken.EncodedId);
+                else Cookies.IssueInvite(Http, pollId, hash, userId);
+            }
+            Nav.NavigateTo("p/" + withToken.EncodedId);
+            return;
+        }
+
+        access = await AccessService.GetAsync(Id, visitor, Http.RequestAborted);
+        if (access is null) { Nav.NotFound(); return; }
+        signedIn = userId is not null;
+
+        if (!isPost)
+        {
+            // A signed-in account that claimed its invitation is found by account; drop the leftover token cookie. A token
+            // cookie issued to someone else (shared browser: another account, or anonymous before a sign-in) is dropped too.
+            if ((access.Voter is { Kind: VoterKind.Account } && visitor.InviteTokenHash is not null)
+                || (visitor.InviteTokenHash is null && Http.Request.Cookies.ContainsKey(PollCookies.InviteCookieName(access.EncodedId))))
+                PollCookies.ForgetInvite(Http, access.EncodedId);
+
+            // Anonymous public-mode voters: a voter identity only counts once the browser has sent the
+            // vk cookie back. First visit: set it and redirect once with ?ck=1. Back without the cookie:
+            // cookies are blocked, the page shows the options and "Cookies are required to vote" (no
+            // form, so no ballot; otherwise every reload would mint a new identity and a new ballot).
+            // No loop: the marker stops the redirect. Signed-in visitors vote by account and get no vk.
+            if (access.Poll.VoterMode == VoterMode.Public && userId is null && !access.IsClosed && visitor.LinkVoterKey is null)
+            {
+                Cookies.EnsureVoterKey(Http);
+                if (CookieCheck is null)
+                {
+                    Nav.NavigateTo(Nav.GetUriWithQueryParameter(CookieCheckQuery, "1"));
+                    return;
+                }
+            }
+            else if (CookieCheck is not null)
+            {
+                Nav.NavigateTo(Nav.GetUriWithQueryParameter(CookieCheckQuery, (string?)null)); // cookie came back: drop the marker
+                return;
+            }
+        }
+
+        var viewerZone = userId is null ? null : (await Users.GetUserAsync(Http.User))?.TimeZone;
+        zone = PollTime.ViewerZone(viewerZone, access.Definition.TimeZone);
+        changes = await Polls.ListChangesAsync(access, Http.RequestAborted);
+
+        if (!access.CanVote && !isPost)
+        {
+            if (access.IsClosed && access.HasBallot)
+                own = (await Ballots.GetVoteStateAsync(Id, visitor, Http.RequestAborted))?.Responses;
+            return;
+        }
+
+        await LoadStateAsync();
+        var q = access.Definition.Questions[0];
+        var many = access.Definition.Responses == ResponsePolicy.Many;
+
+        if (isPost)
+        {
+            var form = await Http.Request.ReadFormAsync(Http.RequestAborted);
+            if (BallotForm.Value(form, "_handler") == DeleteForm)
+            {
+                showSummary = true;
+                values = BallotForm.FromBallot(q, null);
+            }
+            else
+            {
+                values = BallotForm.FromForm(q, form, Ballots.MaxNameLength);
+                editing = many ? BallotForm.ResponseNo(form) : responses.FirstOrDefault()?.ResponseNo;
+            }
+            return; // the named form's handler does the rest
+        }
+
+        // GET states (post/redirect/get): ?saved=1, ?r=N&edit=1, ?new=1.
+        var requested = PositiveInt(ResponseParam);
+        if (many)
+        {
+            if (Flag(NewParam)) editing = null;
+            else if (requested is int n && responses.Any(r => r.ResponseNo == n)) editing = n;
+            else showSummary = responses.Count > 0;
+        }
+        else
+        {
+            editing = responses.FirstOrDefault()?.ResponseNo;
+            showSummary = responses.Count > 0 && !Flag(EditParam) && requested is null;
+        }
+        justSaved = showSummary && Flag(SavedParam);
+        values = BallotForm.FromBallot(q, editing is int e ? responses.FirstOrDefault(r => r.ResponseNo == e) : null);
+    }
+
+    private async Task LoadStateAsync()
+    {
+        var state = await Ballots.GetVoteStateAsync(Id, visitor, Http.RequestAborted);
+        responses = state?.Responses ?? [];
+        canNotify = state?.CanNotify ?? false;
+        var captcha = Settings.Current.Captcha;
+        captchaKey = access!.CanVote && CaptchaProviders.Required(captcha, access.Poll, visitor.UserId) ? captcha.SiteKey : null;
+    }
+
+    /// <summary>The "vote" form: save, or (no JS) switch the dates layout.</summary>
+    private async Task VoteAsync()
+    {
+        if (access is null) return;
+        var form = await Http.Request.ReadFormAsync(Http.RequestAborted);
+        if (BallotForm.IsViewSwitch(form)) return; // re-render with the posted answers in the chosen layout
+
+        var def = access.Definition;
+        var q = def.Questions[0];
+        var parseErrors = new List<string>();
+        var guard = new BallotGuard(BallotForm.Value(form, FormGuard.HoneypotField), BallotForm.CaptchaToken(form),
+            BallotForm.Value(form, FormGuard.StampField), BallotForm.Value(form, BallotForm.FormIdField));
+        var responseNo = def.Responses == ResponsePolicy.Many ? editing : null;
+        var notify = values.Notify && canNotify;
+        SubmitResult? result = q.Type switch
+        {
+            PollType.Ranked => values.ToRanked(q, parseErrors) is { } ranked
+                ? await Ballots.SubmitRankedAsync(Id, visitor, ranked, values.Name, responseNo, guard, notify, Http.RequestAborted) : null,
+            PollType.Points => values.ToPoints(q, parseErrors) is { } points
+                ? await Ballots.SubmitPointsAsync(Id, visitor, points, values.Name, responseNo, guard, notify, Http.RequestAborted) : null,
+            PollType.Dates => await Ballots.SubmitDatesAsync(Id, visitor, values.ToDates(), values.Name, responseNo, guard, notify, Http.RequestAborted),
+            _ => throw new InvalidOperationException($"Unknown poll type {q.Type}."),
+        };
+        if (result is { Succeeded: true })
+        {
+            Nav.NavigateTo($"p/{access.EncodedId}?saved=1");
+            return;
+        }
+        errors = result is null ? parseErrors : Refusal(result);
+        await AfterRefusalAsync(result);
+        // A response that is gone is not edited any more: sending again adds the values as a new one.
+        if (editing is int n && responses.All(r => r.ResponseNo != n)) editing = null;
+    }
+
+    /// <summary>The "delete" form: Delete… asks (second render), Delete in that render deletes.</summary>
+    private async Task DeleteAsync()
+    {
+        if (access is null) return;
+        var form = await Http.Request.ReadFormAsync(Http.RequestAborted);
+        if (PositiveInt(BallotForm.Value(form, BallotForm.ConfirmField)) is int n)
+        {
+            var result = await Ballots.DeleteResponseAsync(Id, visitor, n, Http.RequestAborted);
+            if (result.Succeeded)
+            {
+                Nav.NavigateTo($"p/{access.EncodedId}");
+                return;
+            }
+            summaryErrors = Refusal(result);
+            await AfterRefusalAsync(result);
+        }
+        else if (BallotForm.ResponseNo(form) is int ask)
+        {
+            if (!access.CanVote) summaryErrors = [Reason(access)];
+            else if (responses.All(r => r.ResponseNo != ask)) summaryErrors = [BallotService.ResponseGoneMessage];
+            else confirming = ask;
+        }
+        if (responses.Count == 0)
+        {
+            // Nothing left to list (or no identity any more): the editor for a new response, with the reason.
+            showSummary = false;
+            errors = summaryErrors;
+            summaryErrors = [];
+        }
+    }
+
+    private List<string> Refusal(SubmitResult result) =>
+        result.Access is { Denial: AccessDenial.NoVoterIdentity } || access is { Denial: AccessDenial.NoVoterIdentity }
+            ? [NoCookieMessage]
+            : result.Errors.Count > 0 ? result.Errors.ToList() : ["Your ballot could not be saved."];
+
+    private static string Reason(PollAccess a) =>
+        a.Denial == AccessDenial.NoVoterIdentity ? NoCookieMessage : a.ReasonIfDenied ?? "You cannot vote in this poll.";
+
+    private async Task AfterRefusalAsync(SubmitResult? result)
+    {
+        if (result?.Access is { } after) access = after;
+        await LoadStateAsync();
+    }
+}

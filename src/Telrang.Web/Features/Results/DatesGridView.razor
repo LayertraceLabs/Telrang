@@ -1,0 +1,54 @@
+@using Telrang.Core.Ballots
+@* The ballots view of a dates poll (DESIGN.md §33), "Who can when": one row per ballot (named for the viewer,
+   BallotTable), one column per date, in submission order. One page of RowWindow.PageSize ballots (DESIGN.md §31). *@
+<h2 class="h5" id="@Anchor">Who can when</h2>
+@if (Rows.Count == 0)
+{
+    <p class="text-secondary">No responses yet.</p>
+}
+else
+{
+    <RowsPager Window="Window" BaseHref="@BaseHref" Anchor="@Anchor" Label="Who can when pages" Noun="Ballots" />
+    <div class="table-responsive ballots-scroll">
+        <table class="table table-sm align-middle dates-grid">
+            <thead>
+                <tr>
+                    <th scope="col" class="ballots-sticky">Name</th>
+                    @foreach (var o in Definition.Questions[0].Options)
+                    {
+                        <th scope="col" class="dates-grid-head" @key="o.Key">@DatesFormat.LongLabel(o)</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @* Plain markup per cell, no component (DESIGN.md §31): the icon is the sprite's <use>, as Icon renders it. *@
+                @foreach (var g in Rows)
+                {
+                    <tr>
+                        <th scope="row" class="dates-grid-name ballots-sticky"><bdi>@g.Name</bdi></th>
+                        @for (var i = 0; i < g.Answers.Count; i++)
+                        {
+                            var word = DatesFormat.Word(g.Answers[i]);
+                            <td class="dates-grid-cell dates-cell-@word" data-state="@word"><svg class="icon" aria-hidden="true" focusable="false"><use href="@IconHref(g.Answers[i])"></use></svg><span class="visually-hidden">@word</span></td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    public const string Anchor = "who-can-when";
+
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public IReadOnlyList<DatesGridRow> Rows { get; set; } = [];
+    [Parameter, EditorRequired] public RowWindow Window { get; set; } = default!;
+
+    /// <summary>The ballots view's address (<c>p/{id}/results?view=ballots</c>), for the pager.</summary>
+    [Parameter, EditorRequired] public string BaseHref { get; set; } = "";
+
+    private string? sprite;
+
+    private string IconHref(Availability a) => $"{sprite ??= Assets["icons.svg"]}#{DatesFormat.IconName(a)}";
+}

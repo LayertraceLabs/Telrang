@@ -1,0 +1,90 @@
+@using Telrang.Core.Ballots
+@* One answer of a dates ballot (DESIGN.md §18.2, §21.1). In the vote form: a radio group (yes / maybe when allowed /
+   no) named o.{key}, the same name in all three views, so the browser keeps one answer per option; only the shown view
+   renders it checked. Calendar and timeline show icons only (the words are visually hidden); the list shows icon and
+   word as a segmented control. With JS, dates.js replaces the compact radios by one button that cycles no → yes →
+   maybe → no (rendered hidden here). The state is in an icon and a word, never in colour alone. ReadOnly renders the
+   static answer (BallotView). *@
+@if (ReadOnly)
+{
+    <span class="dates-cell dates-cell-@Word dates-cell-static @(Compact ? "" : "dates-cell-wide")" data-state="@Word">
+        <Icon Name="@DatesFormat.IconName(Value)" />
+        @if (Compact)
+        {
+            <span class="dates-cell-label" aria-hidden="true">@SlotStart@if (SlotEnd is not null) {<text>–</text><wbr />@SlotEnd}</span>
+            <span class="visually-hidden">@DatesFormat.LongLabel(Option): @Word</span>
+        }
+        else
+        {
+            <span class="dates-cell-label">@Capital(Value)</span>
+        }
+    </span>
+}
+else
+{
+    <fieldset class="@(Compact ? "dates-pick dates-pick-compact" : "dates-pick dates-seg")" data-dates-cell data-key="@Option.Key"
+              data-label="@DatesFormat.LongLabel(Option)" data-state="@Word">
+        <legend class="visually-hidden">@DatesFormat.LongLabel(Option)</legend>
+        @if (Compact)
+        {
+            <span class="dates-pick-slot" aria-hidden="true">@SlotStart@if (SlotEnd is not null) {<text>–</text><wbr />@SlotEnd}</span>
+        }
+        <span class="dates-pick-opts">
+            @foreach (var a in Order)
+            {
+                var id = $"{IdPrefix}-{DatesFormat.Word(a)}";
+                <input type="radio" class="dates-pick-input" id="@id" name="@(Preview ? null : BallotForm.Field(Option.Key))" data-field="@BallotForm.Field(Option.Key)" value="@DatesFormat.Word(a)"
+                       checked="@(Active && a == Value)" />
+                <label class="@(Compact ? "dates-pick-opt" : "dates-seg-btn") dates-seg-@DatesFormat.Word(a)" for="@id">
+                    <Icon Name="@DatesFormat.IconName(a)" />
+                    @if (Compact)
+                    {
+                        <span class="visually-hidden">@Capital(a)</span>
+                    }
+                    else
+                    {
+                        @Capital(a)
+                    }
+                </label>
+            }
+        </span>
+        @if (Compact)
+        {
+            <button type="button" class="dates-cell dates-cell-@Word" data-cycle hidden aria-pressed="@(Value == Availability.Yes ? "true" : "false")">
+                <Icon Name="@DatesFormat.IconName(Value)" />
+                <span class="dates-cell-label" aria-hidden="true">@SlotStart@if (SlotEnd is not null) {<text>–</text><wbr />@SlotEnd}</span>
+                <span class="visually-hidden" data-cycle-text>@DatesFormat.LongLabel(Option): @Word</span>
+            </button>
+        }
+    </fieldset>
+}
+
+@code {
+    /// <summary>The slot label split at the en dash, so a span may break only there (the label itself never wraps mid-time).</summary>
+    private string SlotStart => DatesFormat.SlotLabel(Option) is var l && l.IndexOf('–') is var d and >= 0 ? l[..d] : DatesFormat.SlotLabel(Option);
+    private string? SlotEnd => DatesFormat.SlotLabel(Option) is var l && l.IndexOf('–') is var d and >= 0 ? l[(d + 1)..] : null;
+
+    [Parameter, EditorRequired] public PollOption Option { get; set; } = default!;
+    /// <summary>Calendar and timeline show the slot label (time or day number); the list shows the answer word.</summary>
+    [Parameter] public DatesView View { get; set; } = DatesView.List;
+    [Parameter] public Availability Value { get; set; }
+    /// <summary>The poll's <c>maybe:</c> setting.</summary>
+    [Parameter] public bool AllowMaybe { get; set; } = true;
+    [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>In the vote form: this cell is in the view shown, so its radio carries <c>checked</c>.</summary>
+    [Parameter] public bool Active { get; set; }
+    /// <summary>The home page example (DESIGN.md §23.2): radios without a name (dates.js keeps one answer per option).</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    private bool Compact => View != DatesView.List;
+    private string Word => DatesFormat.Word(Value);
+    private string IdPrefix => $"d-{BallotForm.ViewValue(View)}-{Option.Key}";
+    private Availability[] Order => AllowMaybe ? [Availability.Yes, Availability.Maybe, Availability.No] : [Availability.Yes, Availability.No];
+
+    private static string Capital(Availability a) => a switch
+    {
+        Availability.Yes => "Yes",
+        Availability.Maybe => "Maybe",
+        _ => "No",
+    };
+}

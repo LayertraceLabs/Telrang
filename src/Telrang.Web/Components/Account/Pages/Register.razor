@@ -1,0 +1,121 @@
+@page "/Account/Register"
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject TimeProvider TimeProvider
+@inject ILogger<Register> Logger
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+@inject SettingsService Settings
+@inject AccountService Accounts
+
+<PageTitle>Register</PageTitle>
+
+@if (enabled)
+{
+    <h1>Register</h1>
+    @if (!Settings.Current.Mail.IsConfigured)
+    {
+        <p class="text-secondary">No verification mail here: ask an admin to verify your account.</p>
+    }
+    <div class="row">
+        <div class="col-12 col-lg-6">
+            <StatusMessage Message="@Message" />
+            <EditForm Model="Input" method="post" OnValidSubmit="RegisterUser" FormName="register">
+                <DataAnnotationsValidator />
+                <FormGuardFields />
+                <ValidationSummary class="text-danger" role="alert" />
+                <div class="form-floating mb-3">
+                    <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control" autocomplete="username" aria-required="true" placeholder="name@example.com" />
+                    <label for="Input.Email">Email</label>
+                    <ValidationMessage For="() => Input.Email" class="text-danger" />
+                </div>
+                <div class="form-floating mb-3">
+                    <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="form-control" autocomplete="new-password" aria-required="true" placeholder="password" />
+                    <label for="Input.Password">Password (12+ characters)</label>
+                    <ValidationMessage For="() => Input.Password" class="text-danger" />
+                </div>
+                <div class="form-floating mb-3">
+                    <InputText type="password" @bind-Value="Input.ConfirmPassword" id="Input.ConfirmPassword" class="form-control" autocomplete="new-password" aria-required="true" placeholder="password" />
+                    <label for="Input.ConfirmPassword">Confirm password</label>
+                    <ValidationMessage For="() => Input.ConfirmPassword" class="text-danger" />
+                </div>
+                <button type="submit" class="w-100 btn btn-lg btn-primary">Register</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private IEnumerable<IdentityError>? identityErrors;
+    private bool enabled;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private Dictionary<string, object?> Back => new() { ["ReturnUrl"] = ReturnUrl };
+
+    private string? Message => identityErrors is null ? null : $"Error: {string.Join(" ", identityErrors.Select(error => error.Description))}";
+
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+        // Registration.Enabled (admin settings) off: the page does not exist, GET and POST alike.
+        enabled = Settings.Current.RegistrationEnabled;
+        if (!enabled) NavigationManager.NotFound();
+    }
+
+    public async Task RegisterUser(EditContext editContext)
+    {
+        if (!enabled) return;
+
+        var email = Input.Email.Trim();
+        var user = new ApplicationUser { UserName = email, Email = email, SelfRegistered = true, CreatedAt = TimeProvider.GetUtcNow() };
+        // Identity hashes the password before it checks the address, so a taken address costs the same time.
+        var result = await UserManager.CreateAsync(user, Input.Password);
+        if (!result.Succeeded)
+        {
+            // A taken address answers like a new one (pentest AV-10: no account oracle): the existing owner gets a note.
+            // Other errors (password rules, a malformed address) do not depend on the address being known.
+            var errors = result.Errors.Where(e => e.Code is not (nameof(IdentityErrorDescriber.DuplicateEmail) or nameof(IdentityErrorDescriber.DuplicateUserName))).ToList();
+            if (errors.Count > 0)
+            {
+                identityErrors = errors;
+                return;
+            }
+            await Accounts.NotifyRegistrationAttemptAsync(email);
+            RedirectManager.RedirectTo("Account/RegisterConfirmation", Back);
+            return;
+        }
+
+        Logger.LogInformation("User created a new account with password.");
+        await Accounts.SendVerificationAsync(user);
+        // No sign-in here: the answer must not differ from a taken address's (a session cookie would tell).
+        RedirectManager.RedirectTo("Account/RegisterConfirmation", Back);
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [EmailAddress]
+        [Display(Name = "Email")]
+        public string Email { get; set; } = "";
+
+        [Required]
+        [StringLength(256, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 12)]
+        [DataType(DataType.Password)]
+        [Display(Name = "Password")]
+        public string Password { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Display(Name = "Confirm password")]
+        [Compare("Password", ErrorMessage = "Passwords do not match.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

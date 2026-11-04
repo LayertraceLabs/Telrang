@@ -1,0 +1,243 @@
+@inherits AdminTabBase
+@inject SettingsService Settings
+@inject MailSender Sender
+
+<h2 class="visually-hidden">Mail</h2>
+<AdminStatus Message="@StatusMessage" Ok="@StatusOk" />
+
+@if (stats is { } st)
+{
+    <div class="small mb-3">
+        <span class="badge @(configured ? "text-bg-success" : "text-bg-secondary") me-1">@(configured ? "Configured" : "Not configured")</span>
+        @st.Queued queued · @st.Dead dead
+        @if (st.Dead > 0)
+        {
+            <button type="button" class="btn btn-sm btn-outline-danger ms-2" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.PurgeDeadMailAsync(c))">Purge dead</button>
+        }
+        @if (st.LastError is not null)
+        {
+            <br /><span class="text-danger text-break">Last error@(st.LastErrorAt is { } at ? " (" + PollText.DateTime(at) + ")" : ""): @st.LastError</span>
+        }
+        <OptionHelp Label="Mail queue">
+            <p>Mail is only ever queued and sent by a background sender every 10 seconds. Configured means SMTP host, from
+                address and a Public URL are set; otherwise nothing is queued and mails are dropped, not held for later.</p>
+            <p>A failed delivery is retried after 1, 5, 15 and 60 minutes; the fifth failure makes the message dead. A message
+                still unsent after 7 days is dead too. Dead and sent messages lose their text at once, and sent ones are
+                deleted after 48 hours. <em>Purge dead</em> deletes the dead rows (recipient, type, error); they cannot be
+                resent. Logged.</p>
+        </OptionHelp>
+    </div>
+}
+
+@if (Settings.Current.PublicUrl is null)
+{
+    <p class="small text-warning-emphasis">Mail needs a Public URL. <a href="admin?tab=settings">Set it</a>.</p>
+}
+
+<form class="mb-4" @onsubmit="SaveAsync">
+    <div class="row g-2">
+        <div class="col-12 col-md-6 option-field">
+            <label for="mail-host" class="form-label small mb-0">SMTP host</label>
+            <OptionHelp Label="SMTP host">
+                <p>The mail server that delivers for this site. With the from address and the Public URL (Settings) mail
+                    counts as configured. Changing host, port, security or username without entering a password clears the
+                    stored password, so it is never sent to another server. Typical: port 587 with STARTTLS, an SMTP
+                    token or app password as password.</p>
+            </OptionHelp>
+            <input id="mail-host" class="form-control" placeholder="smtp.example.com" autocomplete="off" @bind="host" />
+        </div>
+        <div class="col-6 col-md-2 option-field">
+            <label for="mail-port" class="form-label small mb-0">Port</label>
+            <OptionHelp Label="Port">
+                <p>Default 587 (submission with STARTTLS). 465 is usual for implicit TLS, 25 for a relay without login.</p>
+            </OptionHelp>
+            <input id="mail-port" type="number" min="1" max="65535" class="form-control" @bind="port" />
+        </div>
+        <div class="col-6 col-md-4 option-field">
+            <label for="mail-security" class="form-label small mb-0">Security</label>
+            <OptionHelp Label="Security">
+                <p>STARTTLS (the default): the connection is upgraded to TLS, and nothing is sent if the server does not offer
+                    it. Implicit TLS: TLS from the first byte, usually on port 465. The server's certificate is checked in both
+                    cases. None: no encryption, for a relay on the same host or a trusted network only; it is refused together
+                    with a username, so a password never travels in clear text.</p>
+            </OptionHelp>
+            <select id="mail-security" class="form-select" @bind="security">
+                <option value="@MailSecurity.StartTls">STARTTLS</option>
+                <option value="@MailSecurity.ImplicitTls">Implicit TLS</option>
+                <option value="@MailSecurity.None">None</option>
+            </select>
+        </div>
+        <div class="col-12 col-md-6 option-field">
+            <label for="mail-user" class="form-label small mb-0">Username</label>
+            <OptionHelp Label="Username">
+                <p>The SMTP login. Empty: the server is used without login.</p>
+            </OptionHelp>
+            <input id="mail-user" class="form-control" autocomplete="off" @bind="username" />
+        </div>
+        <div class="col-12 col-md-6 option-field">
+            <label for="mail-password" class="form-label small mb-0">Password or token</label>
+            <OptionHelp Id="mail-password" Label="Password or token">
+                <p>Stored encrypted with the Data Protection keys and never shown again ("unchanged"); an empty field keeps the
+                    stored one. It is cleared when host, port, security or username change without a new one.
+                    <em>Remove password</em> deletes it. Prefer an app-specific token over an account password.</p>
+            </OptionHelp>
+            <input id="mail-password" type="password" class="form-control" autocomplete="new-password" placeholder="@(hasPassword ? "unchanged" : "")" @bind="password" />
+            @if (hasPassword)
+            {
+                <div class="form-check small">
+                    <input class="form-check-input" type="checkbox" id="mail-clear-password" @bind="clearPassword" />
+                    <label class="form-check-label" data-help="mail-password" for="mail-clear-password">Remove password</label>
+                </div>
+            }
+        </div>
+        <div class="col-12 col-md-6 option-field">
+            <label for="mail-from" class="form-label small mb-0">From address</label>
+            <OptionHelp Label="From address">
+                <p>Sender of every mail; required for mail to count as configured. Its domain needs SPF, DKIM and DMARC records
+                    at your DNS provider that allow the SMTP host, or the mail lands in spam.</p>
+            </OptionHelp>
+            <input id="mail-from" type="email" class="form-control" placeholder="vote@example.com" @bind="fromAddress" />
+        </div>
+        <div class="col-12 col-md-6 option-field">
+            <label for="mail-from-name" class="form-label small mb-0">From name</label>
+            <OptionHelp Label="From name">
+                <p>The name shown with the from address. Empty: the address alone.</p>
+            </OptionHelp>
+            <input id="mail-from-name" class="form-control" @bind="fromName" />
+        </div>
+        <div class="col-12 col-md-4 option-field">
+            <label for="mail-cap" class="form-label small mb-0">Per hour</label>
+            <OptionHelp Label="Per hour">
+                <p>Mails sent in any hour, all types together; the rest waits in the queue. Account and security mail goes
+                    first, and results-ready mail gets at most three quarters of it. Default 100, at least 1.</p>
+            </OptionHelp>
+            <input id="mail-cap" type="number" min="1" class="form-control" @bind="hourlyCap" />
+        </div>
+        <div class="col-12 col-md-4 option-field">
+            <label for="mail-cooldown" class="form-label small mb-0">Cooldown (min)</label>
+            <OptionHelp Label="Cooldown">
+                <p>Minutes between two mails of the same type to the same address; one inside that time is dropped, not
+                    delayed. Results-ready mail has no cooldown; the test mail and security notices are exempt. Default 15, 0 =
+                    none.</p>
+            </OptionHelp>
+            <input id="mail-cooldown" type="number" min="0" class="form-control" @bind="cooldown" />
+        </div>
+        <div class="col-12 col-md-4 option-field">
+            <label for="mail-daily" class="form-label small mb-0">Per recipient/day</label>
+            <OptionHelp Label="Per recipient per day">
+                <p>Mails of one type to one address in 24 hours; further ones are dropped. It keeps the site from being used to
+                    flood someone with verification or reset mails. Results-ready mail has its own maximum of 20; the test mail
+                    and security notices are exempt. Default 3, at least 1.</p>
+            </OptionHelp>
+            <input id="mail-daily" type="number" min="1" class="form-control" @bind="dailyMax" />
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+        <button type="submit" class="btn btn-primary" disabled="@Busy">Save</button>
+        <button type="button" class="btn btn-outline-secondary" disabled="@(Busy || !configured)" @onclick="TestAsync">Send test mail to me</button>
+        <OptionHelp Label="Save and Send test mail to me">
+            <p>The admin log records which fields changed, never the password.</p>
+            <p><em>Send test mail to me</em> queues a mail to your own account's address. It skips the per-recipient limits but
+                counts toward the hourly cap. Needs mail configured. The table below and the last error show whether it went
+                out. Logged.</p>
+        </OptionHelp>
+    </div>
+</form>
+
+<div class="d-flex flex-wrap align-items-center gap-1 mb-2">
+    <h3 class="h5 mb-0">Last 50 messages</h3>
+    <OptionHelp Label="Last 50 messages">
+        <p>Recipient, type and state of the newest messages. Their text is not kept once sent or dead, and sent messages are
+            deleted after 48 hours.</p>
+    </OptionHelp>
+</div>
+@if (recent is null || recent.Count == 0)
+{
+    <p class="text-secondary">None.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm admin-table">
+            <thead><tr><th>To</th><th>Type</th><th>State</th><th>Time</th></tr></thead>
+            <tbody>
+                @foreach (var m in recent)
+                {
+                    <tr>
+                        <td class="text-break">@m.To</td>
+                        <td>@m.Type</td>
+                        <td>@m.State</td>
+                        <td class="text-nowrap">@PollText.DateTime(m.At)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private string? host;
+    private int port = 587;
+    private MailSecurity security = MailSecurity.StartTls;
+    private string? username;
+    private string? password;
+    private bool hasPassword;
+    private bool clearPassword;
+    private string? fromAddress;
+    private string? fromName;
+    private int hourlyCap;
+    private int cooldown;
+    private int dailyMax;
+    private bool configured;
+    private MailQueueStats? stats;
+    private IReadOnlyList<MailLogRow>? recent;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override Task OnActionDoneAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var m = Settings.Current.Mail;
+        (host, port, security, username, hasPassword, fromAddress, fromName) = (m.Host, m.Port, m.Security, m.Username, m.HasPassword, m.FromAddress, m.FromName);
+        (hourlyCap, cooldown, dailyMax, configured) = (m.HourlyCap, m.CooldownMinutes, m.DailyMax, m.IsConfigured);
+        password = null;
+        clearPassword = false;
+        if (await WithAdminAsync((a, c) => a.IsAdminAsync(c)))
+        {
+            stats = await Sender.GetStatsAsync();
+            recent = await Sender.RecentAsync(50);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(fromAddress) && !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(fromAddress.Trim()))
+        {
+            (StatusMessage, StatusOk) = ("From address is not a valid email.", false);
+            return;
+        }
+        if (port is < 1 or > 65535 || hourlyCap < 1 || cooldown < 0 || dailyMax < 1)
+        {
+            (StatusMessage, StatusOk) = ("Port 1–65535; per hour and per day at least 1.", false);
+            return;
+        }
+        var values = new Dictionary<string, string?>
+        {
+            [SettingKeys.MailHost] = host,
+            [SettingKeys.MailPort] = port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [SettingKeys.MailSecurity] = security.ToString(),
+            [SettingKeys.MailUsername] = username,
+            [SettingKeys.MailFromAddress] = fromAddress,
+            [SettingKeys.MailFromName] = fromName,
+            [SettingKeys.MailHourlyCap] = hourlyCap.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [SettingKeys.MailCooldownMinutes] = cooldown.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [SettingKeys.MailDailyMax] = dailyMax.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+        if (clearPassword) values[SettingKeys.MailPassword] = null;
+        else if (!string.IsNullOrEmpty(password)) values[SettingKeys.MailPassword] = password;
+        await RunAsync((a, c) => a.SaveSettingsAsync(c, values, "mail.settings"));
+    }
+
+    private Task TestAsync() => RunAsync((a, c) => a.SendTestMailAsync(c));
+}

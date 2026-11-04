@@ -1,0 +1,19 @@
+@inherits ShellBase
+
+<div class="shell shell-compact">
+    <header class="app-header app-header-slim">
+        <div class="shell-container app-header-inner">
+            <AppBrand />
+            <AppNav CssClass="app-nav-horizontal app-nav-quiet d-none d-sm-flex" />
+            <ThemeSwitch />
+            <div class="app-header-end"><UserMenu AppLinks AppLinksClass="d-sm-none" /></div>
+        </div>
+    </header>
+    <main class="app-main">
+        <article class="content shell-container">
+            @Body
+        </article>
+    </main>
+    <SiteFooter />
+</div>
+<ErrorUi />

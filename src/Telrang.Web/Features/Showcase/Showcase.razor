@@ -1,0 +1,69 @@
+@using Telrang.Core.Ballots
+@using Telrang.Core.Scoring
+@inject TimeProvider Clock
+
+@* Home page examples (DESIGN.md §23.2): one poll per type with the real voting fields (Preview: no field names) and
+   its results for 7 made-up ballots, scored here by Core. Definitions and ballots are built in code (ShowcasePolls),
+   never stored. There is no form and nothing has a name, so nothing can be posted; js/showcase.js adds the switch and
+   loads vote.js, which enhances the fields with the vote page's own modules. *@
+
+<section class="showcase" data-showcase aria-labelledby="showcase-title">
+    <h2 id="showcase-title" class="visually-hidden">Examples</h2>
+    <div class="showcase-switch" role="group" aria-label="Example" data-showcase-switch hidden>
+        @foreach (var (key, label) in Tabs)
+        {
+            <button type="button" class="showcase-switch-btn" data-showcase-tab="@key" aria-pressed="false">@label</button>
+        }
+    </div>
+
+    <div class="showcase-example" data-showcase-panel="ranked">
+        <ShowcaseFrame Title="@ranked.Definition.Title" Description="@ranked.Definition.DescriptionMarkdown" Voters="ranked.Ballots.Count">
+            <Ballot>
+                <RankedVote Question="ranked.Question" Values="empty" Preview />
+                <div class="showcase-tally"><span class="small submit-summary" data-tally>@RankedVote.Tally(ranked.Question, empty)</span></div>
+            </Ballot>
+            <Results><RankedResultsView Definition="ranked.Definition" Results="rankedResults.Ranked!" /></Results>
+        </ShowcaseFrame>
+    </div>
+
+    <div class="showcase-example" data-showcase-panel="points">
+        <ShowcaseFrame Title="@points.Definition.Title" Description="@points.Definition.DescriptionMarkdown" Voters="points.Ballots.Count">
+            <Ballot>
+                <PointsVote Question="points.Question" Values="empty" Preview />
+                <div class="showcase-tally">@PointsVote.Tally(points.Question, empty)</div>
+            </Ballot>
+            <Results><PointsResultsView Definition="points.Definition" Results="pointsResults.Points" Distribution="pointsResults.PointsDistribution" /></Results>
+        </ShowcaseFrame>
+    </div>
+
+    <div class="showcase-example" data-showcase-panel="dates">
+        <ShowcaseFrame Title="@dates.Definition.Title" Description="@dates.Definition.DescriptionMarkdown" Voters="dates.Ballots.Count">
+            <Ballot>
+                <DatesVote Question="dates.Question" Values="empty" Preview />
+                <div class="showcase-tally"><span class="dates-tally" aria-live="polite" aria-atomic="true" data-tally>@DatesVote.Tally(dates.Question, empty)</span></div>
+            </Ballot>
+            <Results><DatesResultsView Definition="dates.Definition" Results="datesResults" /></Results>
+        </ShowcaseFrame>
+    </div>
+</section>
+
+@code {
+    private static readonly (string Key, string Label)[] Tabs = [("ranked", "Ranked"), ("points", "Points"), ("dates", "Dates")];
+
+    private readonly BallotForm empty = new();
+    private ShowcaseExample<RankedBallot> ranked = default!;
+    private ShowcaseExample<PointsBallot> points = default!;
+    private ShowcaseExample<DatesBallot> dates = default!;
+    private PollResults rankedResults = default!, pointsResults = default!;
+    private DatesResultSet datesResults = default!;
+
+    protected override void OnInitialized()
+    {
+        ranked = ShowcasePolls.Ranked();
+        points = ShowcasePolls.Points();
+        dates = ShowcasePolls.Dates(DateOnly.FromDateTime(Clock.GetUtcNow().UtcDateTime));
+        rankedResults = ResultsService.Ranked(ranked.Definition, ranked.Ballots);
+        pointsResults = ResultsService.Points(points.Definition, points.Ballots);
+        datesResults = DatesResults.Compute(dates.Question, dates.Ballots);
+    }
+}

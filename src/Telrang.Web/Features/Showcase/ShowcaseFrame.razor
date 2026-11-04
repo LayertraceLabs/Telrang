@@ -1,0 +1,27 @@
+@* One home page example (DESIGN.md §23.2) in its dashed preview frame: badge, title, description, then the ballot fields
+   next to the results. [data-ballot] stands in for the vote form as the scope of the vote modules (tally, budget). *@
+<div class="showcase-frame">
+    <div class="showcase-head">
+        <span class="badge showcase-badge">Example</span>
+        <h3 class="h4 mb-0 text-break">@Title</h3>
+    </div>
+    <div class="showcase-description poll-markdown">@Telrang.Web.Features.Polls.MarkdownRenderer.Render(Description)</div>
+    <div class="showcase-grid">
+        <div class="showcase-part showcase-ballot" data-ballot>
+            <h4 class="showcase-part-title">Your vote</h4>
+            @Ballot
+        </div>
+        <div class="showcase-part">
+            <h4 class="showcase-part-title">Results <span class="showcase-voters">@Voters voters</span></h4>
+            @Results
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public string Description { get; set; } = "";
+    [Parameter, EditorRequired] public int Voters { get; set; }
+    [Parameter, EditorRequired] public RenderFragment Ballot { get; set; } = default!;
+    [Parameter, EditorRequired] public RenderFragment Results { get; set; } = default!;
+}

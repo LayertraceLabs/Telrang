@@ -1,0 +1,136 @@
+@inherits AdminTabBase
+
+<h2 class="visually-hidden">Polls</h2>
+<AdminStatus Message="@StatusMessage" Ok="@StatusOk" />
+<div class="d-flex flex-wrap align-items-center gap-1 small text-secondary mb-2">
+    <span>All polls, newest first · Actions</span>
+    <OptionHelp Id="poll-actions" Label="Poll actions">
+        <ul>
+            <li><em>Close</em>: ends voting now. Results then follow the poll's own visibility setting, and voters who asked to
+                be mailed when it closes get the results-ready mail (when mail is configured; at most once a day per poll).
+                The owner can reopen it.</li>
+            <li><em>Reopen</em> (polls closed by hand): removes that close. A poll whose close date has passed stays closed.
+                The owner's open-polls limit is not checked.</li>
+            <li><em>Transfer to…</em>: hands the poll to another account that has a verified email and has finished setup.
+                Ballots, invite links and aliases stay. The old owner loses owner access (owner-only results included) and
+                "Email me when this poll closes" is cleared on his own ballots in it; an open live results view of his ends.
+                The close date stays; the new owner's duration limit applies only when it changes. Takes a tick box.</li>
+            <li><em>Delete…</em>: deletes the poll with its ballots and invite links at once. The owner is not told. No undo
+                except a backup. Takes a tick box.</li>
+        </ul>
+    </OptionHelp>
+</div>
+@if (polls is null)
+{
+    <p>Loading…</p>
+}
+else if (polls.Count == 0)
+{
+    <EmptyState Text="No polls." />
+}
+else
+{
+    <ul class="list-group admin-polls">
+        @foreach (var p in polls)
+        {
+            <li class="list-group-item" @key="p.EncodedId">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                    <div class="text-break">
+                        <a class="fw-semibold" href="p/@p.EncodedId" data-enhance-nav="false">@p.Title</a>
+                        <div class="small text-secondary">
+                            <span class="badge @(p.IsClosed ? "text-bg-secondary" : "badge-open") me-1">@(p.IsClosed ? "Closed" : "Open")</span>
+                            @PollText.TypeName(p.Type) · @p.BallotCount @(p.BallotCount == 1 ? "ballot" : "ballots") · by @p.OwnerEmail · created @PollText.Date(p.CreatedAt)
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        @if (p.ClosedManually)
+                        {
+                            <button class="btn btn-sm btn-outline-success" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.SetPollClosedAsync(c, p.EncodedId, false))">Reopen</button>
+                        }
+                        else if (!p.IsClosed)
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.SetPollClosedAsync(c, p.EncodedId, true))">Close</button>
+                        }
+                        @if (transferring != p.EncodedId)
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => AskTransfer(p.EncodedId)">Transfer to…</button>
+                        }
+                        @if (confirming != p.EncodedId)
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Ask(p.EncodedId)">Delete…</button>
+                        }
+                    </div>
+                </div>
+                @if (transferring == p.EncodedId)
+                {
+                    <div class="confirm-panel mt-2">
+                        <label class="form-label small mb-1" data-help="poll-actions" for="transfer-@p.EncodedId">New owner (email)</label>
+                        <input id="transfer-@p.EncodedId" type="email" class="form-control form-control-sm mb-2" autocomplete="off" @bind="transferEmail" @bind:event="oninput" />
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="confirm-transfer-@p.EncodedId" @bind="transferChecked" />
+                            <label class="form-check-label" for="confirm-transfer-@p.EncodedId">
+                                Transfer “@p.Title” from @p.OwnerEmail to this account.
+                            </label>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                            <button class="btn btn-sm btn-primary" disabled="@(!transferChecked || string.IsNullOrWhiteSpace(transferEmail) || Busy)"
+                                    @onclick="() => RunAsync((a, c) => a.TransferPollAsync(c, p.EncodedId, transferEmail))">Transfer</button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => AskTransfer(null)">Cancel</button>
+                        </div>
+                    </div>
+                }
+                @if (confirming == p.EncodedId)
+                {
+                    <div class="confirm-panel mt-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="confirm-poll-@p.EncodedId" @bind="confirmChecked" />
+                            <label class="form-check-label" for="confirm-poll-@p.EncodedId">
+                                Delete “@p.Title” with its @p.BallotCount @(p.BallotCount == 1 ? "ballot" : "ballots") and invite links.
+                            </label>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                            <button class="btn btn-sm btn-danger" disabled="@(!confirmChecked || Busy)" @onclick="() => RunAsync((a, c) => a.DeletePollAsync(c, p.EncodedId))">Delete poll</button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => Ask(null)">Cancel</button>
+                        </div>
+                    </div>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private List<AdminPollRow>? polls;
+    private string? confirming;
+    private bool confirmChecked;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private string? transferring;
+    private string? transferEmail;
+    private bool transferChecked;
+
+    protected override Task OnActionDoneAsync()
+    {
+        confirming = null;
+        if (StatusOk) transferring = null; // a refused transfer keeps the panel open to fix the email
+        return LoadAsync();
+    }
+
+    private void AskTransfer(string? id)
+    {
+        transferring = id;
+        transferEmail = null;
+        transferChecked = false;
+        confirming = null;
+    }
+
+    private async Task LoadAsync() => polls = (await WithAdminAsync((a, c) => a.ListPollsAsync(c)))?.ToList();
+
+    private void Ask(string? id)
+    {
+        confirming = id;
+        confirmChecked = false;
+        transferring = null;
+    }
+}

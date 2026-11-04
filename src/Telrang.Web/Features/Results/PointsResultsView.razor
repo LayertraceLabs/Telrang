@@ -1,0 +1,135 @@
+@using Telrang.Core.Scoring
+@* Points results: total, mean, supporters, max, and a five-bucket distribution per option.
+   Bars are inline SVG (width/height attributes) because the CSP forbids style attributes. *@
+
+@if (Results is null || Distribution is null)
+{
+    <div class="alert alert-info" role="status">No results.</div>
+}
+else
+{
+    var cap = PointsBuckets.Cap(Definition);
+    var maxTotal = Results.Rows.Count == 0 ? 0 : Results.Rows.Max(r => r.Total);
+    <details class="small mb-3">
+        <summary>How scoring works</summary>
+        <ul class="mb-0 mt-1">
+            @foreach (var line in PollText.ScoringDetails(Definition.Questions[0]))
+            {
+                <li>@line</li>
+            }
+            <li>Mean counts every voter, including those who gave 0. Supporters gave the option at least one point.</li>
+        </ul>
+    </details>
+
+    @* Phones (< 576 px): one card per option instead of the wide table, so nothing scrolls sideways. *@
+    <ol class="list-unstyled results-cards d-sm-none">
+        @{ var cardPlace = 0; long? cardPrevious = null; }
+        @for (var i = 0; i < Results.Rows.Count; i++)
+        {
+            var row = Results.Rows[i];
+            if (cardPrevious != row.Total) cardPlace = i + 1;
+            cardPrevious = row.Total;
+            var buckets = Distribution.TryGetValue(row.Key, out var b) ? b : new int[PointsBuckets.Count];
+            <li class="card results-card" @key="row.Key">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-baseline gap-2">
+                        <span class="fw-semibold text-break">@cardPlace. @row.Label</span>
+                        <span class="font-monospace text-nowrap">@row.Total <span class="small text-secondary">total</span></span>
+                    </div>
+                    @Bar(row, maxTotal <= 0 ? 0 : row.Total * 100.0 / maxTotal, cardPlace == 1)
+                    <div class="small text-secondary mt-1">Mean @row.Mean.ToString("0.0", Inv) · @row.SupporterCount @(row.SupporterCount == 1 ? "supporter" : "supporters") (@Percent(row.SupporterCount)) · max @row.Max</div>
+                    <div class="small text-secondary mt-1"><abbr title="@SpreadTip(cap)">Spread</abbr></div>
+                    <div>@Spread(buckets, cap, Results.VoterCount)</div>
+                </div>
+            </li>
+        }
+    </ol>
+
+    <div class="table-responsive d-none d-sm-block">
+        <table class="table align-middle results-table points-results">
+            <thead>
+                <tr>
+                    <th scope="col">#</th>
+                    <th scope="col" class="opt-col">Option</th>
+                    <th scope="col" class="text-end">Total</th>
+                    <th scope="col" class="text-end">Mean</th>
+                    <th scope="col" class="text-end"><abbr title="Voters who gave it more than 0 points">Supporters</abbr></th>
+                    <th scope="col" class="text-end"><abbr title="Most points one voter gave it">Max</abbr></th>
+                    <th scope="col"><abbr title="@SpreadTip(cap)">Spread</abbr></th>
+                </tr>
+            </thead>
+            <tbody>
+                @{ var place = 0; long? previous = null; }
+                @for (var i = 0; i < Results.Rows.Count; i++)
+                {
+                    var row = Results.Rows[i];
+                    if (previous != row.Total) place = i + 1;
+                    previous = row.Total;
+                    var buckets = Distribution.TryGetValue(row.Key, out var b) ? b : new int[PointsBuckets.Count];
+                    <tr @key="row.Key">
+                        <td>@place</td>
+                        <td class="opt-col">
+                            <span class="fw-semibold">@row.Label</span>
+                            @Bar(row, maxTotal <= 0 ? 0 : row.Total * 100.0 / maxTotal, place == 1)
+                        </td>
+                        <td class="text-end font-monospace">@row.Total</td>
+                        <td class="text-end font-monospace">@row.Mean.ToString("0.0", Inv)</td>
+                        <td class="text-end">@row.SupporterCount <span class="small text-secondary">(@Percent(row.SupporterCount))</span></td>
+                        <td class="text-end">@row.Max</td>
+                        <td>
+                            @Spread(buckets, cap, Results.VoterCount)
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter] public PointsResultSet? Results { get; set; }
+    [Parameter] public IReadOnlyDictionary<string, int[]>? Distribution { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    private static string F(double v) => v.ToString("0.##", Inv);
+
+    /// <summary>The Spread column's tooltip: the points ranges of its bars, left to right.</summary>
+    private static string SpreadTip(int cap) =>
+        "Voters per points given: " + string.Join(", ", Enumerable.Range(0, PointsBuckets.Count).Select(k => PointsBuckets.Label(k, cap)));
+
+    /// <param name="lead">The leading option (first place, ties included): its bar takes the highlight colour.</param>
+    private static RenderFragment Bar(PointsResultRow row, double percent, bool lead) => __builder =>
+    {
+        <svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+            <title>Total @row.Total · mean @row.Mean.ToString("0.0", Inv) · @row.SupporterCount @(row.SupporterCount == 1 ? "supporter" : "supporters")</title>
+            <rect class="bar-track" x="0" y="0" width="100" height="6" />
+            <rect class="@(lead ? "bar-fill bar-fill-lead" : "bar-fill")" x="0" y="0" width="@F(percent)" height="6" />
+        </svg>
+    };
+
+    /// <summary>The five-bucket distribution as an SVG histogram plus its text for screen readers.</summary>
+    private static RenderFragment Spread(int[] buckets, int cap, int voters) => __builder =>
+    {
+        var bucketMax = Math.Max(1, buckets.Max());
+        <svg class="histogram" viewBox="0 0 50 30" preserveAspectRatio="none" aria-hidden="true">
+            @for (var k = 0; k < PointsBuckets.Count; k++)
+            {
+                var h = buckets[k] * 28.0 / bucketMax;
+                <g>
+                    <title>@PointsBuckets.Label(k, cap) points: @PollText.VotersShare(buckets[k], voters)</title>
+                    <rect class="hist-hit" x="@(k * 10)" y="0" width="10" height="30" />
+                    <rect class="hist-bar @(k == 0 ? "hist-zero" : "")" x="@(k * 10 + 1)" y="@F(30 - h)" width="8" height="@F(h)" />
+                </g>
+            }
+            <line class="hist-axis" x1="0" y1="30" x2="50" y2="30" />
+        </svg>
+        <span class="visually-hidden">@string.Join(", ", Enumerable.Range(0, PointsBuckets.Count).Select(k => $"{PointsBuckets.Label(k, cap)} points: {buckets[k]} {(buckets[k] == 1 ? "voter" : "voters")}"))</span>
+    };
+
+
+    private string Percent(int count) => Results is null || Results.VoterCount == 0
+        ? "0%"
+        : (count * 100.0 / Results.VoterCount).ToString("0", Inv) + "%";
+}

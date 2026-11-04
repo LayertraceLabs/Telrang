@@ -1,0 +1,15 @@
+@* Honeypot + signed render time for publicly exposed forms (Security/FormGuard). The honeypot is
+   moved off-screen by CSS (no style attribute: CSP), skipped by keyboard and hidden from screen readers. *@
+@inject Telrang.Web.Security.FormGuard Guard
+<div class="hp-field" aria-hidden="true">
+    <label for="@id">Website</label>
+    <input id="@id" name="@Telrang.Web.Security.FormGuard.HoneypotField" type="text" tabindex="-1" autocomplete="off" value="" />
+</div>
+<input type="hidden" name="@Telrang.Web.Security.FormGuard.StampField" value="@stamp" />
+
+@code {
+    private readonly string id = "hp-" + Guid.NewGuid().ToString("N")[..8];
+    private string stamp = "";
+
+    protected override void OnInitialized() => stamp = Guard.CreateStamp();
+}

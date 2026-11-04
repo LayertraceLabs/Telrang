@@ -1,0 +1,117 @@
+@page "/Account/Manage"
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Profile</PageTitle>
+
+<h2 class="h4">Profile</h2>
+<StatusMessage />
+
+<div class="row">
+    <div class="col-xl-6">
+        <EditForm Model="Input" FormName="profile" OnValidSubmit="OnValidSubmitAsync" method="post">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" role="alert" />
+            <div class="form-floating mb-3">
+                <input type="text" value="@email" id="email" class="form-control" disabled />
+                <label for="email" class="form-label">Email</label>
+            </div>
+            <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.DisplayName" id="Input.DisplayName" class="form-control" maxlength="@ApplicationUser.MaxDisplayNameLength" autocomplete="nickname" placeholder="name" />
+                <label for="Input.DisplayName" class="form-label">Display name</label>
+                <ValidationMessage For="() => Input.DisplayName" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputSelect @bind-Value="Input.TimeZone" id="Input.TimeZone" class="form-select" data-default-tz>
+                    <option value="">—</option>
+                    @foreach (var tz in TimeZones.All)
+                    {
+                        <option value="@tz">@tz</option>
+                    }
+                </InputSelect>
+                <label for="Input.TimeZone" class="form-label">Time zone</label>
+                <ValidationMessage For="() => Input.TimeZone" class="text-danger" />
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <InputCheckbox @bind-Value="Input.HideIdentity" id="Input.HideIdentity" class="form-check-input mt-0" />
+                <label for="Input.HideIdentity" class="form-check-label">Hide name in the header</label>
+                <OptionHelp Label="Hide name in the header">
+                    <p>The header shows a plain avatar instead of your display name (or the part of your email before the @@),
+                        for screen sharing or a shared screen. Your email never shows in the header; it shows only on these
+                        account pages.</p>
+                </OptionHelp>
+            </div>
+            <button type="submit" class="w-100 btn btn-lg btn-primary">Save</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private ApplicationUser? user;
+    private string? email;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Set before the first await: the page renders while the user loads (at once with a truly async database).
+        var posted = Input is not null;
+        Input ??= new();
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        email = await UserManager.GetEmailAsync(user);
+        if (!posted) (Input.DisplayName, Input.TimeZone, Input.HideIdentity) = (user.DisplayName, user.TimeZone, user.HideIdentity);
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        var timeZone = string.IsNullOrWhiteSpace(Input.TimeZone) ? null : Input.TimeZone;
+        if (timeZone is not null && !TimeZones.IsKnown(timeZone))
+        {
+            RedirectManager.RedirectToCurrentPageWithStatus("Error: Pick a time zone from the list.", HttpContext);
+            return;
+        }
+
+        user.DisplayName = string.IsNullOrWhiteSpace(Input.DisplayName) ? null : Input.DisplayName.Trim();
+        user.TimeZone = timeZone;
+        user.HideIdentity = Input.HideIdentity;
+        var result = await UserManager.UpdateAsync(user);
+        // The header reads the name and the hide flag from claims (DESIGN.md §24.2): renew this session's cookie now;
+        // other sessions pick it up at their next security stamp validation.
+        if (result.Succeeded) await SignInManager.RefreshSignInAsync(user);
+        RedirectManager.RedirectToCurrentPageWithStatus(result.Succeeded ? "Saved." : "Error: " + string.Join(" ", result.Errors.Select(e => e.Description)), HttpContext);
+    }
+
+    private sealed class InputModel
+    {
+        [StringLength(ApplicationUser.MaxDisplayNameLength)]
+        [Display(Name = "Display name")]
+        public string? DisplayName { get; set; }
+
+        [StringLength(100)]
+        public string? TimeZone { get; set; }
+
+        public bool HideIdentity { get; set; }
+    }
+}

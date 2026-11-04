@@ -1,0 +1,33 @@
+@* The poll's rules as one line under the title, with the long form behind a disclosure (UI copy rules). *@
+<p class="poll-rules small mb-1">
+    <span>@PollText.RulesLine(Definition.Questions[0])</span>
+    @if (IsClosed)
+    {
+        <span class="badge text-bg-secondary ms-1">Closed</span>
+    }
+    else if (ClosesAt is { } closes)
+    {
+        <span class="text-secondary ms-1" title="@(AutoClose ? "Maximum poll duration" : null)">Closes @PollTime.Format(closes, ZoneId)</span>
+    }
+</p>
+<p class="small text-secondary mb-1 results-line">@PollText.ResultsLine(Definition)</p>
+<details class="small mb-3 poll-rules-details">
+    <summary>How scoring works</summary>
+    <ul class="mb-0 mt-1">
+        @foreach (var line in PollText.ScoringDetails(Definition.Questions[0]))
+        {
+            <li>@line</li>
+        }
+    </ul>
+</details>
+
+@code {
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter] public bool IsClosed { get; set; }
+    /// <summary>The close instant (end of the close day in the poll's zone).</summary>
+    [Parameter] public DateTimeOffset? ClosesAt { get; set; }
+    /// <summary><see cref="ClosesAt"/> is the automatic close (no close date).</summary>
+    [Parameter] public bool AutoClose { get; set; }
+    /// <summary>IANA zone to show the close time in.</summary>
+    [Parameter] public string? ZoneId { get; set; }
+}

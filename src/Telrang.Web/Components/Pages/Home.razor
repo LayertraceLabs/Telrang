@@ -1,0 +1,58 @@
+@page "/"
+@layout MainLayout
+@attribute [ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = AppPolicies.NotGated)]
+@* Static SSR, no circuit for anyone (DESIGN.md §23.2): banner, name, welcome, sign-in links (or My polls), the
+   examples (Showcase, enhanced by js/showcase.js). MainLayout (§24.1): the signed-in shell for an
+   account, PublicLayout for everyone else; both render without a circuit. *@
+@inject IOptions<AppOptions> AppOptions
+@inject SettingsService Settings
+@inject Telrang.Web.Features.Branding.BrandingService Branding
+@inject SetupKey SetupKey
+@inject Telrang.Web.Features.Showcase.ShowcaseCache ShowcaseCache
+
+<PageTitle>@AppOptions.Value.Name</PageTitle>
+
+@if (Branding.Url(Telrang.Web.Features.Branding.BrandingService.Banner) is { } banner)
+{
+    <img class="home-banner" src="@banner" alt="" />
+}
+
+<h1>@AppOptions.Value.Name</h1>
+
+@if (Settings.Current.WelcomeMarkdown is { } welcome)
+{
+    <div class="welcome poll-markdown">@Telrang.Web.Features.Polls.MarkdownRenderer.Render(welcome)</div>
+}
+else
+{
+    <p class="lead">Ranked choice, points and date polls, shared by link.</p>
+}
+
+<AuthorizeView>
+    <Authorized>
+        <a class="btn btn-primary btn-lg" href="polls">My polls</a>
+    </Authorized>
+    <NotAuthorized>
+        @if (SetupKey.IsLive)
+        {
+            <p><a href="setup">Set up this server</a> with the key from the server log.</p>
+        }
+        <div class="d-flex flex-column flex-sm-row gap-2">
+            <a class="btn btn-primary btn-lg" href="Account/Login">Log in</a>
+            @if (Settings.Current.RegistrationEnabled)
+            {
+                <a class="btn btn-outline-primary btn-lg" href="Account/Register">Register</a>
+            }
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+
+@* Rendered once per day and reused (ShowcaseCache, DESIGN.md §31). *@
+@showcase
+
+@code {
+    private MarkupString showcase;
+
+    protected override async Task OnInitializedAsync() => showcase = await ShowcaseCache.GetAsync(Assets["icons.svg"]);
+}

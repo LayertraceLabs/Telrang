@@ -1,0 +1,8 @@
+@inject NavigationManager NavigationManager
+
+@code {
+    // Gated account (AccountGate): any page it is not allowed to see sends it to enrolment. Full
+    // load, so the request goes through the HTTP pipeline (and a pending session is signed out).
+    protected override void OnInitialized() =>
+        NavigationManager.NavigateTo(Telrang.Web.Security.AccountGate.EnrolPath, forceLoad: true);
+}

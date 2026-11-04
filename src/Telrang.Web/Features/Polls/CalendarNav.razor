@@ -1,0 +1,212 @@
+@* Month navigation of the editor's dates calendar (DESIGN.md §27): previous / next month around the month title; the title
+   zooms out to the 12 months of the year, its title to the decade, then the century. Picking zooms back in; previous /
+   next step at each level. A typed year jumps to that year's months. Years 1 to 9999. The day grid is ChildContent. *@
+
+<div class="cal-nav" @onkeydown="Key">
+    <div class="editor-cal-head">
+        <button type="button" class="btn btn-sm btn-outline-secondary btn-icon" aria-label="@StepLabel(-1)" title="@StepLabel(-1)"
+                disabled="@(!CanStep(-1))" @onclick="() => StepAsync(-1)"><Icon Name="chevron-left" /></button>
+        <div class="cal-nav-title" aria-live="polite">
+            @if (level == Level.Decades)
+            {
+                <span class="editor-cal-month">@Title</span>
+            }
+            else
+            {
+                <button type="button" class="cal-nav-zoom editor-cal-month" aria-label="@ZoomLabel" title="@ZoomLabel" @onclick="ZoomOut">@Title</button>
+            }
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary btn-icon" aria-label="@StepLabel(1)" title="@StepLabel(1)"
+                disabled="@(!CanStep(1))" @onclick="() => StepAsync(1)"><Icon Name="chevron-right" /></button>
+    </div>
+    @if (level == Level.Days)
+    {
+        @ChildContent
+    }
+    else
+    {
+        <div class="cal-nav-grid" role="group" aria-label="@Title">
+            @foreach (var item in Items())
+            {
+                var it = item;
+                <button type="button" class="cal-nav-item @(it.Current ? "current" : "")" aria-current="@(it.Current ? "true" : null)"
+                        aria-label="@it.Name" @onclick="() => PickAsync(it.Value)">@it.Text</button>
+            }
+        </div>
+        <div class="cal-nav-year">
+            <label class="form-label small mb-0" for="@($"{IdPrefix}-year")">Year</label>
+            <OptionHelp Label="Year">
+                <p>Any year from 1 to 9999 opens its months. Dates before 15 October 1582 are counted in the Gregorian
+                    calendar extended backwards (proleptic), not in the Julian calendar used at the time.</p>
+            </OptionHelp>
+            <input id="@($"{IdPrefix}-year")" type="number" min="1" max="9999" step="1" inputmode="numeric"
+                   class="form-control form-control-sm editor-number cal-nav-year-input @(yearError is null ? "" : "is-invalid")"
+                   aria-describedby="@(yearError is null ? null : $"{IdPrefix}-year-err")" aria-invalid="@(yearError is null ? null : "true")"
+                   value="@yearText" @onchange="YearChanged" />
+            @if (yearError is not null)
+            {
+                <div class="invalid-feedback d-block" id="@($"{IdPrefix}-year-err")">@yearError</div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The month shown (its first day).</summary>
+    [Parameter, EditorRequired] public DateOnly Month { get; set; }
+    [Parameter] public EventCallback<DateOnly> MonthChanged { get; set; }
+    /// <summary>The day grid of <see cref="Month"/>.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    /// <summary>Prefix of the element ids (the editor's id).</summary>
+    [Parameter, EditorRequired] public string IdPrefix { get; set; } = "";
+
+    public const int FirstYear = 1, LastYear = 9999;
+
+    private enum Level { Days, Months, Years, Decades }
+
+    private Level level = Level.Days;
+    /// <summary>Months level: the year; years level: a year of the decade; decades level: a year of the century.</summary>
+    private int year;
+    private string yearText = "";
+    private string? yearError;
+
+    private static readonly string[] MonthShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    private static readonly string[] MonthLong =
+        ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    private static string Y(int y) => y.ToString("0000", System.Globalization.CultureInfo.InvariantCulture);
+
+    private int DecadeStart => year / 10 * 10;
+    private int CenturyStart => year / 100 * 100;
+
+    private string Title => level switch
+    {
+        Level.Days => DatesFormat.MonthName(Month.Year, Month.Month),
+        Level.Months => Y(year),
+        Level.Years => $"{Y(Math.Max(DecadeStart, FirstYear))}–{Y(DecadeStart + 9)}",
+        _ => $"{Y(Math.Max(CenturyStart, FirstYear))}–{Y(CenturyStart + 99)}",
+    };
+
+    private string ZoomLabel => level switch
+    {
+        Level.Days => "Choose month",
+        Level.Months => "Choose year",
+        _ => "Choose decade",
+    };
+
+    private string StepLabel(int delta) => (delta < 0 ? "Previous " : "Next ") + level switch
+    {
+        Level.Days => "month",
+        Level.Months => "year",
+        Level.Years => "decade",
+        _ => "century",
+    };
+
+    /// <summary>Months since January of year 1.</summary>
+    private static int MonthIndex(DateOnly d) => (d.Year - 1) * 12 + d.Month - 1;
+
+    private bool CanStep(int delta) => level switch
+    {
+        Level.Days => MonthIndex(Month) + delta is >= 0 and < LastYear * 12,
+        Level.Months => year + delta is >= FirstYear and <= LastYear,
+        Level.Years => DecadeStart + 10 * delta is >= 0 and <= LastYear,
+        _ => CenturyStart + 100 * delta is >= 0 and <= LastYear,
+    };
+
+    private async Task StepAsync(int delta)
+    {
+        if (!CanStep(delta)) return;
+        switch (level)
+        {
+            case Level.Days:
+                await MonthChanged.InvokeAsync(Month.AddMonths(delta));
+                break;
+            case Level.Months:
+                year += delta;
+                break;
+            case Level.Years:
+                year = Math.Clamp(year + 10 * delta, FirstYear, LastYear);
+                break;
+            default:
+                year = Math.Clamp(year + 100 * delta, FirstYear, LastYear);
+                break;
+        }
+    }
+
+    private void ZoomOut()
+    {
+        if (level == Level.Days) year = Month.Year;
+        level = level switch { Level.Days => Level.Months, Level.Months => Level.Years, _ => Level.Decades };
+        yearText = "";
+        yearError = null;
+    }
+
+    private sealed record Item(int Value, string Text, string Name, bool Current);
+
+    private IEnumerable<Item> Items()
+    {
+        switch (level)
+        {
+            case Level.Months:
+                for (var m = 1; m <= 12; m++)
+                    yield return new Item(m, MonthShort[m - 1], $"{MonthLong[m - 1]} {Y(year)}", Month.Year == year && Month.Month == m);
+                break;
+            case Level.Years:
+                for (var y = Math.Max(DecadeStart, FirstYear); y <= DecadeStart + 9; y++)
+                    yield return new Item(y, Y(y), Y(y), Month.Year == y);
+                break;
+            default:
+                for (var d = CenturyStart; d <= CenturyStart + 90; d += 10)
+                {
+                    var from = Math.Max(d, FirstYear);
+                    yield return new Item(from, $"{Y(d)}s", $"{Y(from)}–{Y(d + 9)}", Month.Year >= d && Month.Year <= d + 9);
+                }
+                break;
+        }
+    }
+
+    private async Task PickAsync(int value)
+    {
+        switch (level)
+        {
+            case Level.Months:
+                level = Level.Days;
+                await MonthChanged.InvokeAsync(new DateOnly(year, value, 1));
+                break;
+            case Level.Years:
+                year = value;
+                level = Level.Months;
+                break;
+            default:
+                year = value;
+                level = Level.Years;
+                break;
+        }
+    }
+
+    private void YearChanged(ChangeEventArgs e)
+    {
+        yearText = e.Value?.ToString() ?? "";
+        if (yearText.Length > 16) yearText = yearText[..16]; // a year is four digits; nothing longer is kept (R3-RES-2)
+        if (int.TryParse(yearText.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var y)
+            && y is >= FirstYear and <= LastYear)
+        {
+            year = y;
+            level = Level.Months;
+            yearText = "";
+            yearError = null;
+        }
+        else
+        {
+            yearError = "Enter a year from 1 to 9999.";
+        }
+    }
+
+    /// <summary>Escape leaves the zoomed-out levels.</summary>
+    private void Key(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape" || level == Level.Days) return;
+        level = Level.Days;
+        yearError = null;
+    }
+}

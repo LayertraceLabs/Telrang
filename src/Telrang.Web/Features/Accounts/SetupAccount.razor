@@ -1,0 +1,114 @@
+@page "/setup/account/{Token}"
+@layout PublicLayout
+@* Reachable while the account gate is up (AccountGate). *@
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject AccountService Accounts
+@inject EmailProtection Emails
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager Nav
+
+<PageTitle>Set up account</PageTitle>
+
+@if (match is not null)
+{
+    <h1>Set up account</h1>
+    <div class="row">
+        <div class="col-12 col-md-8 col-lg-6">
+            @if (errors is not null)
+            {
+                <div class="alert alert-danger" role="alert">@errors</div>
+            }
+            <EditForm Model="Input" method="post" OnValidSubmit="CompleteAsync" FormName="setup-account">
+                <DataAnnotationsValidator />
+                <FormGuardFields />
+                <ValidationSummary class="text-danger" role="alert" />
+                @if (invitedEmail is not null)
+                {
+                    <div class="form-floating mb-3">
+                        <input id="invited-email" class="form-control" value="@invitedEmail" disabled />
+                        <label for="invited-email">Email</label>
+                    </div>
+                }
+                else
+                {
+                    <div class="form-floating mb-3">
+                        <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control" autocomplete="username" placeholder="name@example.com" />
+                        <label for="Input.Email">Email</label>
+                    </div>
+                }
+                <div class="form-floating mb-3">
+                    <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="form-control" autocomplete="new-password" placeholder="password" />
+                    <label for="Input.Password">Password (12+ characters)</label>
+                </div>
+                <div class="form-floating mb-3">
+                    <InputText type="password" @bind-Value="Input.ConfirmPassword" id="Input.ConfirmPassword" class="form-control" autocomplete="new-password" placeholder="password" />
+                    <label for="Input.ConfirmPassword">Confirm password</label>
+                </div>
+                <button type="submit" class="w-100 btn btn-lg btn-primary">Continue</button>
+                <p class="form-text mt-2">Next: authenticator app.</p>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string Token { get; set; } = "";
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    private LinkMatch? match;
+    private string? invitedEmail;
+    private string? errors;
+
+    [CascadingParameter]
+    private HttpContext Http { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        match = await Accounts.FindLinkAsync(Token, [SetupLinkPurpose.AccountSetup, SetupLinkPurpose.EmailInvite]);
+        if (match is null)
+        {
+            // Unknown, used, superseded or expired: one hint for all, still a 404.
+            Telrang.Web.Components.Pages.NotFound.SetHint(Http, "This setup link expired or was already used. Ask an admin for a new one.");
+            Nav.NotFound();
+            return;
+        }
+        invitedEmail = match.Link.Purpose == SetupLinkPurpose.EmailInvite ? Emails.Reveal(match.User.Email) : null;
+    }
+
+    private async Task CompleteAsync()
+    {
+        if (match is null) return;
+        if (invitedEmail is null && string.IsNullOrWhiteSpace(Input.Email))
+        {
+            errors = "Enter an email address.";
+            return;
+        }
+        var outcome = await Accounts.CompleteSetupAsync(Token, Input.Email, Input.Password);
+        if (!outcome.Result.Succeeded)
+        {
+            errors = string.Join(" ", outcome.Result.Errors.Select(e => e.Description));
+            return;
+        }
+        await SignInManager.SignInAsync(outcome.User!, isPersistent: false);
+        Nav.NavigateTo(AccountGate.EnrolPath);
+    }
+
+    private sealed class InputModel
+    {
+        [EmailAddress]
+        public string? Email { get; set; }
+
+        [Required, StringLength(256, MinimumLength = 12, ErrorMessage = "The password must be at least {2} characters long.")]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+
+        [Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
+        [DataType(DataType.Password)]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

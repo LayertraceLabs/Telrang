@@ -1,0 +1,14 @@
+@inject SettingsService Settings
+@inject Telrang.Web.Features.Branding.BrandingService Branding
+
+<a class="app-brand" href="">
+    @if (Branding.Url(Telrang.Web.Features.Branding.BrandingService.Logo) is { } logo)
+    {
+        <img class="brand-logo" src="@logo" alt="@Settings.AppName" />
+    }
+    else
+    {
+        <svg class="brand-mark" aria-hidden="true" focusable="false"><use href="@($"{Assets["icons.svg"]}#brand-mark")"></use></svg>
+        <span class="app-brand-name">@Settings.AppName</span>
+    }
+</a>

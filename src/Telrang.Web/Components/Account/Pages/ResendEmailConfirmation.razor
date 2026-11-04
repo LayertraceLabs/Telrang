@@ -1,0 +1,63 @@
+@page "/Account/ResendEmailConfirmation"
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject AccountService Accounts
+
+<PageTitle>Resend verification</PageTitle>
+
+<h1>Resend verification</h1>
+<StatusMessage Message="@message" />
+<div class="row">
+    <div class="col-md-6 col-lg-4">
+        <EditForm Model="Input" FormName="resend-email-confirmation" OnValidSubmit="OnValidSubmitAsync" method="post">
+            <DataAnnotationsValidator />
+            <FormGuardFields />
+            <ValidationSummary class="text-danger" role="alert" />
+            <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control" aria-required="true" placeholder="name@example.com" />
+                <label for="Input.Email" class="form-label">Email</label>
+                <ValidationMessage For="() => Input.Email" class="text-danger" />
+            </div>
+            <button type="submit" class="w-100 btn btn-lg btn-primary">Send</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private string? message;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+    }
+
+    private static readonly TimeSpan MinimumAnswerTime = TimeSpan.FromMilliseconds(300);
+
+    private async Task OnValidSubmitAsync()
+    {
+        // Same answer whether or not the address is known; the outbox applies the per-recipient cooldown. Padded to a
+        // fixed minimum like ForgotPassword, so an unverified account's token and outbox work does not show in the time.
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (await UserManager.FindByEmailAsync(Input.Email) is { } user)
+        {
+            await Accounts.SendVerificationAsync(user);
+        }
+        var left = MinimumAnswerTime - System.Diagnostics.Stopwatch.GetElapsedTime(started);
+        if (left > TimeSpan.Zero) await Task.Delay(left);
+        message = "If that address needs verifying, a link is on its way.";
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = "";
+    }
+}

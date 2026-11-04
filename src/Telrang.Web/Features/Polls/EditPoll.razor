@@ -1,0 +1,127 @@
+@page "/polls/{Id}/edit"
+@layout MainLayout
+@attribute [Authorize]
+@inject IOptions<AppOptions> AppOptions
+@inject PollService Polls
+@inject UserManager<ApplicationUser> Users
+@inject NavigationManager Nav
+
+<PageTitle>Edit poll - @AppOptions.Value.Name</PageTitle>
+
+@if (model is not null)
+{
+    <PageHeader Title="Edit poll">
+        <p class="text-secondary">
+            <a href="polls">My polls</a> · <a href="polls/@Id/share">Share</a> · <a href="p/@Id" data-enhance-nav="false">Open poll</a>
+            · @model.BallotCount @(model.BallotCount == 1 ? "ballot" : "ballots")
+        </p>
+    </PageHeader>
+
+    <PollEditor @ref="editor" Initial="initial!" Existing="model.Definition" Validated="OnValidated" DefaultTimeZone="@model.Definition.TimeZone"
+                DraftKey="@draftKey" MaxDurationDays="@durationDays" CreatedAt="@model.CreatedAt" StoredClosesAt="@model.ClosesAt">
+        @if (pending.Count > 0)
+        {
+            @* DESIGN.md §26: what the change log will record, before saving. *@
+            <div class="alert alert-info mt-3 mb-0 change-preview" role="status">
+                <p class="mb-1">Voters will see:</p>
+                <ul class="mb-0">
+                    @foreach (var c in pending)
+                    {
+                        <li><ChangeLine Kind="c.Kind" Label="@c.Label" OldLabel="@c.OldLabel"
+                            BallotCount="@(c.Kind == OptionChangeKind.Removed ? model.AnswersPerKey?.GetValueOrDefault(c.Key) ?? 0 : null)" /></li>
+                    }
+                </ul>
+            </div>
+        }
+        @if (message is not null)
+        {
+            <div class="alert @(ok ? "alert-success" : "alert-danger") mt-3" role="status">@message</div>
+        }
+        <div class="mt-3 d-flex gap-2">
+            <button type="button" class="btn btn-primary btn-lg" disabled="@(busy || !canSave)" @onclick="SaveAsync">Save changes</button>
+            <a class="btn btn-outline-secondary btn-lg" href="polls/@Id/share">Done</a>
+        </div>
+    </PollEditor>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private PollEditModel? model;
+    private PollDraft? initial;
+    private bool busy, ok;
+    private bool canSave = true;
+    private string? message;
+    /// <summary>The option changes the change log would record on save (only once the poll has a ballot).</summary>
+    private IReadOnlyList<OptionChange> pending = [];
+    private int durationDays;
+    private string? draftKey;
+    private PollEditor? editor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var userId = Users.GetUserId((await AuthState).User);
+        // Loaded into locals first: the page renders while it awaits, and the editor must get model, draft and limits together.
+        var loaded = userId is null ? null : await Polls.GetForEditAsync(userId, Id);
+        if (loaded is null)
+        {
+            model = null;
+            Nav.NotFound(); // foreign and unknown polls alike: a real 404
+            return;
+        }
+        var days = (await Polls.LimitsForAsync(userId!)).PollDurationDays;
+        model = loaded;
+        durationDays = days;
+        draftKey = PollEditor.DraftKeyFor(userId, Id);
+        initial = PollDraft.FromDefinition(model.Definition);
+    }
+
+    private void OnValidated(DraftResult result)
+    {
+        canSave = result.Success && editor?.IsValid != false;
+        message = null;
+        pending = model is { BallotCount: > 0 } && result.Definition is { } d ? PollService.Changes(model.Definition, d) : [];
+    }
+
+    private async Task SaveAsync()
+    {
+        if (editor is null || model is null) return;
+        message = null;
+        if (!editor.RevealErrors())
+        {
+            ok = false;
+            message = "Fix the marked fields.";
+            return;
+        }
+        busy = true;
+        try
+        {
+            var userId = Users.GetUserId((await AuthState).User);
+            if (userId is null) return;
+            var result = await Polls.UpdatePollAsync(userId, Id, editor.Current);
+            switch (result.Status)
+            {
+                case PollSaveStatus.Ok:
+                    ok = true;
+                    message = result.Message;
+                    pending = [];
+                    model = await Polls.GetForEditAsync(userId, Id);
+                    if (model is not null) await editor.MarkSavedAsync(PollDraft.FromDefinition(model.Definition));
+                    break;
+                case PollSaveStatus.NotFound:
+                    ok = false;
+                    message = "This poll no longer exists.";
+                    break;
+                default:
+                    ok = false;
+                    message = result.Message ?? string.Join(" ", result.Errors.Select(e => e.Message));
+                    break;
+            }
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

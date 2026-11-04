@@ -1,0 +1,25 @@
+@* Primary navigation of the signed-in shells. Grouped (with headings) in the sidebar, flat elsewhere. *@
+<AuthorizeView>
+    <Authorized>
+        <nav class="app-nav @CssClass" aria-label="Main">
+            @if (Grouped)
+            {
+                <div class="app-nav-heading">Polls</div>
+            }
+            <NavLink class="app-nav-link" href="polls"><Icon Name="polls" /><span>My polls</span></NavLink>
+            <NavLink class="app-nav-link" href="my/votes"><Icon Name="votes" /><span>My votes</span></NavLink>
+            <AuthorizeView Policy="@AppPolicies.Admin" Context="admin">
+                @if (Grouped)
+                {
+                    <div class="app-nav-heading">Server</div>
+                }
+                <NavLink class="app-nav-link" href="admin"><Icon Name="admin" /><span>Admin</span></NavLink>
+            </AuthorizeView>
+        </nav>
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public bool Grouped { get; set; }
+}

@@ -1,0 +1,54 @@
+@* "Your responses" (responses: many). Read-only on a closed poll (each response shown); while open, inside the vote
+   page's delete form (DESIGN.md §21.1): an edit link (?r=N&edit=1) and a two-step delete, the confirm being a second
+   render. *@
+<h2 class="h5">Your responses</h2>
+<ul class="list-group mb-3 response-list">
+    @foreach (var r in Responses)
+    {
+        var label = r.DisplayName ?? $"response {r.ResponseNo}";
+        <li class="list-group-item" @key="r.ResponseNo">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="me-auto text-break">
+                    <span class="fw-semibold">@(r.DisplayName ?? $"Response {r.ResponseNo}")</span>
+                    <span class="small text-secondary">· @PollTime.Format(r.UpdatedAt, ZoneId)</span>
+                </span>
+                @if (Editable)
+                {
+                    <span class="d-flex flex-wrap align-items-center gap-2">
+                    @if (Confirming == r.ResponseNo)
+                    {
+                        <span class="fw-semibold" id="confirm-@r.ResponseNo">Delete this response?</span>
+                        <button type="submit" class="btn btn-sm btn-danger" name="@BallotForm.ConfirmField" value="@r.ResponseNo"
+                                aria-describedby="confirm-@r.ResponseNo">Delete</button>
+                        <a class="btn btn-sm btn-outline-secondary" href="p/@EncodedId" data-enhance-nav="false">Cancel</a>
+                    }
+                    else
+                    {
+                        <a class="btn btn-sm btn-outline-primary" href="@($"p/{EncodedId}?r={r.ResponseNo}&edit=1")" data-enhance-nav="false"
+                           aria-label="Edit @label">Edit</a>
+                        <button type="submit" class="btn btn-sm btn-outline-danger" name="@BallotForm.ResponseField" value="@r.ResponseNo"
+                                aria-label="Delete @label">Delete…</button>
+                    }
+                    </span>
+                }
+            </div>
+            @if (ShowBallots)
+            {
+                <div class="mt-2"><BallotView Definition="Definition" Ballot="r" /></div>
+            }
+        </li>
+    }
+</ul>
+
+@code {
+    [Parameter, EditorRequired] public string EncodedId { get; set; } = "";
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public IReadOnlyList<MyBallot> Responses { get; set; } = [];
+    /// <summary>IANA zone the times are shown in.</summary>
+    [Parameter] public string? ZoneId { get; set; }
+    /// <summary>Edit links and delete buttons (open poll; the list is inside the delete form).</summary>
+    [Parameter] public bool Editable { get; set; }
+    [Parameter] public bool ShowBallots { get; set; }
+    /// <summary>The response whose delete is being confirmed.</summary>
+    [Parameter] public int? Confirming { get; set; }
+}

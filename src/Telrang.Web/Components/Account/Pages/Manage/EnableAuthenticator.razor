@@ -1,0 +1,242 @@
+﻿@page "/Account/Manage/EnableAuthenticator"
+@* Reachable while the account gate is up (AccountGate). *@
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+
+@using System.ComponentModel.DataAnnotations
+@using System.Globalization
+@using System.Text
+@using System.Text.Encodings.Web
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+@using Telrang.Web.Features.Accounts
+
+@inject UserManager<ApplicationUser> UserManager
+@inject UrlEncoder UrlEncoder
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<EnableAuthenticator> Logger
+@inject SignInManager<ApplicationUser> SignInManager
+@inject SettingsService Settings
+@inject AccountService Accounts
+
+<PageTitle>Configure authenticator app</PageTitle>
+
+@if (recoveryCodes is not null)
+{
+    <ShowRecoveryCodes RecoveryCodes="recoveryCodes.ToArray()" StatusMessage="@message" />
+    @* The end of the setup link and setup key flows (DESIGN.md §23.3): on to My polls. *@
+    <a class="btn btn-primary mt-3" href="@IdentityRedirectManager.SignedInLanding">Continue</a>
+}
+else
+{
+    <StatusMessage Message="@message" />
+    <h2 class="h4">Authenticator app</h2>
+    @if (mustEnrol)
+    {
+        <p class="text-secondary">Required before you continue.</p>
+    }
+    <ol class="list">
+        <li class="mb-3">
+            Scan with your authenticator app, or enter the key.
+            <div class="d-flex flex-wrap align-items-center gap-3 mt-2">
+                @if (qrSvg is not null)
+                {
+                    @qrSvg
+                }
+                <kbd class="authenticator-key">@sharedKey</kbd>
+            </div>
+            <details class="mt-1">
+                <summary class="small">Setup URI</summary>
+                <code class="small text-break" data-url="@authenticatorUri">@authenticatorUri</code>
+            </details>
+        </li>
+        <li>
+            Enter the 6-digit code it shows:
+            <div class="row mt-2">
+                <div class="col-xl-6">
+                    <EditForm Model="Input" FormName="send-code" OnValidSubmit="OnValidSubmitAsync" method="post">
+                        <DataAnnotationsValidator />
+                        <div class="form-floating mb-3">
+                            <InputText @bind-Value="Input.Code" id="Input.Code" class="form-control" autocomplete="one-time-code" inputmode="numeric" placeholder="123456" />
+                            <label for="Input.Code" class="control-label form-label">Code</label>
+                            <ValidationMessage For="() => Input.Code" class="text-danger" />
+                        </div>
+                        @if (!mustEnrol)
+                        {
+                            <div class="form-floating mb-3">
+                                <InputText type="password" @bind-Value="Input.Secret" id="Input.Secret" class="form-control" autocomplete="current-password" placeholder="password" />
+                                <label for="Input.Secret" class="control-label form-label">Password</label>
+                            </div>
+                        }
+                        <button type="submit" class="w-100 btn btn-lg btn-primary">Verify</button>
+                        <ValidationSummary class="text-danger" role="alert" />
+                    </EditForm>
+                </div>
+            </div>
+        </li>
+    </ol>
+}
+
+@code {
+    private const string AuthenticatorUriFormat = "otpauth://totp/{0}:{1}?secret={2}&issuer={0}&digits=6";
+
+    private string? message;
+    private ApplicationUser? user;
+    private string? sharedKey;
+    private string? authenticatorUri;
+    private IEnumerable<string>? recoveryCodes;
+    private MarkupString? qrSvg;
+    private bool mustEnrol;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+
+        // [AllowAnonymous] (so the gate does not block its own exit): check the session here.
+        if (HttpContext.User.Identity?.IsAuthenticated != true)
+        {
+            RedirectManager.RedirectTo("Account/Login", new() { ["ReturnUrl"] = AccountGate.EnrolPath });
+            return;
+        }
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null || user.PendingSetup || user.DeletedAt is not null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        // With 2FA on, the key is a live credential: never show it again (pentest AV-02). A new key goes through
+        // ResetAuthenticator, which asks for a current code.
+        if (await UserManager.GetTwoFactorEnabledAsync(user))
+        {
+            RedirectManager.RedirectTo("Account/Manage/ResetAuthenticator");
+            return;
+        }
+
+        mustEnrol = user.MustEnrolTwoFactor;
+        await LoadSharedKeyAndQrCodeUriAsync(user);
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        // Turning 2FA on by choice needs the password (pentest R2-ACC-5): a stolen session must not enrol its own app and
+        // lock the owner out. The enrolment gate (fresh setup, admin, after recovery) has just checked a sign-in.
+        if (!mustEnrol && !await Accounts.ReauthenticateAsync(user, Input.Secret))
+        {
+            (SignInManager as AppSignInManager)?.RecordFailure();
+            message = "Error: Password is wrong.";
+            return;
+        }
+
+        // Strip spaces and hyphens
+        var verificationCode = Input.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
+
+        var is2faTokenValid = await UserManager.VerifyTwoFactorTokenAsync(
+            user, UserManager.Options.Tokens.AuthenticatorTokenProvider, verificationCode);
+
+        if (!is2faTokenValid)
+        {
+            message = "Error: Code is wrong. Check the key and the device clock.";
+            return;
+        }
+
+        // Clearing the "must enrol" flag lifts the gate: RefreshSignInAsync re-runs
+        // AppClaimsPrincipalFactory, so the new cookie has no av:gate claim and the next request passes.
+        // (Enabling 2FA also bumps the security stamp, so the cookie must be refreshed regardless.)
+        user.MustEnrolTwoFactor = false;
+        await UserManager.SetTwoFactorEnabledAsync(user, true);
+        await SignInManager.RefreshSignInAsync(user);
+        var userId = await UserManager.GetUserIdAsync(user);
+        Logger.LogInformation("User with ID '{UserId}' has enabled 2FA with an authenticator app.", userId);
+        await Accounts.NotifySecurityChangeAsync(user, "Two-factor authentication was turned on");
+
+        message = "Authenticator app verified.";
+
+        if (await UserManager.CountRecoveryCodesAsync(user) == 0)
+        {
+            recoveryCodes = await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+        }
+        else
+        {
+            RedirectManager.RedirectToWithStatus("Account/Manage/TwoFactorAuthentication", message, HttpContext);
+        }
+    }
+
+    private async ValueTask LoadSharedKeyAndQrCodeUriAsync(ApplicationUser user)
+    {
+        // Load the authenticator key & QR code URI to display on the form
+        var unformattedKey = await UserManager.GetAuthenticatorKeyAsync(user);
+        if (string.IsNullOrEmpty(unformattedKey))
+        {
+            await UserManager.ResetAuthenticatorKeyAsync(user);
+            // That bumped the security stamp; keep this session valid while the user sets up the app.
+            await SignInManager.RefreshSignInAsync(user);
+            unformattedKey = await UserManager.GetAuthenticatorKeyAsync(user);
+        }
+
+        sharedKey = FormatKey(unformattedKey!);
+
+        var email = await UserManager.GetEmailAsync(user);
+        authenticatorUri = GenerateQrCodeUri(email!, unformattedKey!);
+        try
+        {
+            // Markup built by QrCode from the module matrix only; the URI itself is not echoed into it.
+            qrSvg = new MarkupString(QrCode.ToSvg(QrCode.Encode(authenticatorUri), cssClass: "qr-code",
+                ariaLabel: "QR code for the authenticator app"));
+        }
+        catch (ArgumentException)
+        {
+            qrSvg = null; // URI too long for version 10-M: the key alone
+        }
+    }
+
+    private string FormatKey(string unformattedKey)
+    {
+        var result = new StringBuilder();
+        int currentPosition = 0;
+        while (currentPosition + 4 < unformattedKey.Length)
+        {
+            result.Append(unformattedKey.AsSpan(currentPosition, 4)).Append(' ');
+            currentPosition += 4;
+        }
+        if (currentPosition < unformattedKey.Length)
+        {
+            result.Append(unformattedKey.AsSpan(currentPosition));
+        }
+
+        return result.ToString().ToLowerInvariant();
+    }
+
+    private string GenerateQrCodeUri(string email, string unformattedKey)
+    {
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            AuthenticatorUriFormat,
+            UrlEncoder.Encode(Settings.AppName),
+            UrlEncoder.Encode(email),
+            unformattedKey);
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [StringLength(7, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [DataType(DataType.Text)]
+        [Display(Name = "Code")]
+        public string Code { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        public string? Secret { get; set; }
+    }
+}

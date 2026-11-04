@@ -1,0 +1,67 @@
+@inject Telrang.Web.Features.Branding.ThemeService Theme
+@inject Telrang.Web.Features.Branding.BrandingService Branding
+<!DOCTYPE html>
+@* Mode (DESIGN.md §24.4): data-bs-theme is the visitor's choice (av-theme cookie) or the admin's default, null = follow the
+   OS; data-av-theme is the visitor's choice alone (the switch's icon), data-av-default the admin's default (js/theme-switch.js). *@
+<html lang="en" data-bs-theme="@Theme.BootstrapThemeFor(HttpContext)" data-av-theme="@Telrang.Web.Features.Branding.ThemeService.VisitorMode(HttpContext)"
+      data-av-default="@(Theme.Settings.BootstrapTheme ?? "system")">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    @if (PageRenderMode is not null)
+    {
+        @* Interactive pages only: js/links.js loads links to these static pages itself (DESIGN.md §24.6). *@
+        <meta name="av-static-routes" content="@Telrang.Web.Components.Layout.StaticRoutes.Pattern" />
+    }
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["Telrang.Web.styles.css"]" />
+    @* Generated from the admin theme settings (DESIGN.md §17); last, so its custom CSS wins. Admin, account, setup,
+       unsubscribe and error pages get the variant without the custom CSS (ThemeService.UsesAdminVariant), so a broken
+       rule cannot hide the controls that fix it. js/theme.js swaps the href of this one element. *@
+    <link rel="stylesheet" id="theme-css" data-theme-css href="@Theme.UrlFor(HttpContext.Request.Path)" />
+    @* The import map is the one inline script; it carries the per-request CSP nonce. *@
+    <ImportMap nonce="@HttpContext.GetCspNonce()" />
+    @if (Branding.Url(Telrang.Web.Features.Branding.BrandingService.Favicon) is { } favicon)
+    {
+        <link rel="icon" type="image/png" href="@favicon" />
+    }
+    else
+    {
+        @* The brand mark in the palette; the static PNG (default palette) is the fallback for browsers without SVG icons. *@
+        <link rel="icon" type="image/png" href="favicon.png" sizes="64x64" />
+        <link rel="icon" type="image/svg+xml" href="@Theme.FaviconUrl" />
+    }
+    <HeadOutlet @rendermode="PageRenderMode" />
+</head>
+
+@* data-av-user: the account this page was rendered for, empty for none; js/draft.js drops other accounts' drafts. *@
+<body data-av-user="@(HttpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "")">
+    <Routes @rendermode="PageRenderMode" />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["Components/Account/Shared/PasskeySubmit.razor.js"]" type="module"></script>
+    <script src="@Assets["js/timezone.js"]" type="module"></script>
+    <script src="@Assets["js/clipboard.js"]" type="module"></script>
+    <script src="@Assets["js/menus.js"]" type="module"></script>
+    <script src="@Assets["js/links.js"]" type="module"></script>
+    @* Light / dark / system switch in every header (DESIGN.md §24.4); the switch stays hidden until this module runs. *@
+    <script src="@Assets["js/theme-switch.js"]" type="module"></script>
+    @* Home page examples (DESIGN.md §23.2): does nothing without [data-showcase]; global so it also runs after enhanced navigation. *@
+    <script src="@Assets["js/showcase.js"]" type="module"></script>
+    @* On every page: signing out removes this browser's poll drafts. *@
+    <script src="@Assets["js/draft.js"]" type="module"></script>
+</body>
+
+</html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? InteractiveServer : null;
+}

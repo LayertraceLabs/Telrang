@@ -1,0 +1,140 @@
+@inherits AdminTabBase
+@using Telrang.Web.Features.Status
+@inject LogRing Logs
+
+<h2 class="visually-hidden">Status</h2>
+<AdminStatus Message="@StatusMessage" Ok="@StatusOk" />
+
+@if (status is { } s)
+{
+    @foreach (var w in s.Warnings)
+    {
+        <div class="alert alert-warning py-2" role="status">@w</div>
+    }
+    <div class="d-flex flex-wrap align-items-center gap-1 mb-2">
+        <h3 class="h5 mb-0">Server</h3>
+        <OptionHelp Label="Server">
+            <p>Content counts exclude deleted accounts. Live sessions are open interactive pages: signed-in pages; voters on
+                poll pages open none. The database provider is set in the environment.</p>
+        </OptionHelp>
+    </div>
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-md-6">
+            <dl class="status-grid mb-0 text-break">
+                <dt>Version</dt>
+                <dd>@s.Version · @s.Environment</dd>
+                <dt>Uptime</dt>
+                <dd>@StatusService.Duration(s.Uptime) (since @PollText.DateTime(s.StartedAt))</dd>
+                <dt>Public URL</dt>
+                <dd class="text-break">@(s.PublicUrl ?? "not set")</dd>
+                <dt>Database</dt>
+                <dd>@s.Database · @StatusService.Bytes(s.DatabaseBytes) · @StatusService.Bytes(s.FreeBytes) free on the data volume</dd>
+            </dl>
+        </div>
+        <div class="col-12 col-md-6">
+            <dl class="status-grid mb-0 text-break">
+                <dt>Content</dt>
+                <dd>@s.Users @(s.Users == 1 ? "user" : "users") · @s.OpenPolls open and @s.ClosedPolls closed @(s.OpenPolls + s.ClosedPolls == 1 ? "poll" : "polls") · @s.Ballots @(s.Ballots == 1 ? "ballot" : "ballots")</dd>
+                <dt>Mail</dt>
+                <dd>@(s.MailConfigured ? "Configured" : "Not configured") · @s.Mail.Queued queued · @s.Mail.Dead dead</dd>
+                <dt>Live sessions</dt>
+                <dd>@s.Circuits @(s.Circuits == 1 ? "circuit" : "circuits")</dd>
+                <dt>Blocks</dt>
+                <dd><a href="admin?tab=abuse">@s.Blocks active</a></dd>
+            </dl>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-1 mb-2">
+        <h3 class="h5 mb-0">Rates</h3>
+        <OptionHelp Label="Rates">
+            <p>Totals for the last hour and the last 24 hours: requests, 429 responses (rate limits and blocks), failed
+                sign-ins (password, 2FA or recovery code), ballots saved (new or changed), mails delivered and failed delivery
+                attempts. Counted in memory: counters, blocks and the list below start empty after a restart.</p>
+        </OptionHelp>
+    </div>
+    <div class="table-responsive mb-3">
+        <table class="table table-sm admin-table">
+            <thead><tr><th></th><th class="text-end">1 h</th><th class="text-end">24 h</th></tr></thead>
+            <tbody>
+                @foreach (var r in s.Rates)
+                {
+                    <tr><td>@r.Label</td><td class="text-end">@r.LastHour</td><td class="text-end">@r.LastDay</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <h3 class="h5 mb-0">Warnings and errors</h3>
+        <OptionHelp Label="Warnings and errors">
+            <p>The newest @LogRing.Capacity log entries of level Warning or higher since the last start, newest first, kept in
+                memory. Entries that carry a secret (the admin setup and recovery keys) never appear here; the server's console log has
+                everything. <em>Refresh</em> reloads the page's figures and this list; <em>Clear</em> empties this list only,
+                not the console log.</p>
+        </OptionHelp>
+        <span class="me-auto"></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="LoadAsync">Refresh</button>
+        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(Busy || logs.Count == 0)" @onclick="ClearLogAsync">Clear</button>
+    </div>
+    @if (logs.Count == 0)
+    {
+        <p class="text-secondary">None.</p>
+    }
+    else
+    {
+        <ul class="list-group log-list">
+            @foreach (var l in logs)
+            {
+                <li class="list-group-item py-2">
+                    <div class="small text-secondary">
+                        <span class="badge @(l.Level >= LogLevel.Error ? "text-bg-danger" : "text-bg-warning") me-1">@l.Level</span>
+                        @PollText.DateTime(l.At) · <span class="text-break">@ShortCategory(l.Category)</span>
+                    </div>
+                    <div class="small log-message">@l.Message</div>
+                </li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    private StatusSnapshot? status;
+    private IReadOnlyList<LogRingEntry> logs = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        Busy = true;
+        try
+        {
+            if (!await WithAdminAsync((a, c) => a.IsAdminAsync(c))) return;
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            status = await scope.ServiceProvider.GetRequiredService<StatusService>().GetAsync();
+            logs = Logs.Snapshot();
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task ClearLogAsync()
+    {
+        await RunAsync(async (a, c) =>
+        {
+            if (!await a.IsAdminAsync(c)) return AdminOutcome.Denied;
+            Logs.Clear();
+            return new AdminOutcome(true, "Log cleared.");
+        });
+    }
+
+    protected override async Task OnActionDoneAsync()
+    {
+        await LoadAsync();
+    }
+
+    private static string ShortCategory(string category) =>
+        category.StartsWith("Telrang.", StringComparison.Ordinal) ? category[(category.LastIndexOf('.') + 1)..] : category;
+}

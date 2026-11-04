@@ -1,0 +1,54 @@
+@* "Show help" / "Hide help" (DESIGN.md §22.2, §23.4): folds or unfolds every OptionHelp under the State it is given.
+   The choice is remembered per browser and area (js/help.js) and applied after the first render; Changed lets the
+   owner re-render so the cascade reaches every toggle. A module that fails to load leaves help folded. *@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+<button type="button" class="btn btn-sm btn-outline-secondary @CssClass" aria-pressed="@(State.AllOpen ? "true" : "false")" @onclick="ToggleAsync">
+    <Icon Name="info" /> @(State.AllOpen ? "Hide help" : "Show help")
+</button>
+
+@code {
+    [Parameter, EditorRequired] public HelpState State { get; set; } = default!;
+
+    [Parameter] public string? CssClass { get; set; }
+
+    /// <summary>Raised after the fold-all state changed (by a click or the remembered choice).</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private IJSObjectReference? module;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !RendererInfo.IsInteractive) return;
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/help.js");
+            if (await module.InvokeAsync<bool>("load", State.Area) && !State.AllOpen)
+            {
+                State.SetAll(true);
+                await Changed.InvokeAsync();
+                StateHasChanged();
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { module = null; }
+    }
+
+    private async Task ToggleAsync()
+    {
+        State.SetAll(!State.AllOpen);
+        await Changed.InvokeAsync();
+        if (module is null) return;
+        try { await module.InvokeVoidAsync("save", State.Area, State.AllOpen); }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is null) return;
+        try { await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+    }
+}

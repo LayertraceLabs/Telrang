@@ -1,0 +1,144 @@
+@* Ranked ballot fields inside the static vote form (DESIGN.md §21.1). Without JS: a position field per option and, with
+   bans on, a Ban checkbox. ranking.js hides them behind the drag zones and buttons below (rendered hidden, from the same
+   values) and writes them on every move; every move is also possible with the buttons. Each item carries all its
+   buttons; CSS shows the ones of the zone it is in. ranking.js finds the fields by data-field, not name: the home page
+   example (Preview) renders them without names. *@
+
+<div class="ranked-vote" data-ranked data-max-bans="@q.MaxBans">
+    <div class="visually-hidden" aria-live="polite" aria-atomic="true" data-announce></div>
+
+    <fieldset class="rank-fields" data-rank-fields>
+        <legend class="h5 zone-title">Your ranking</legend>
+        <p class="small text-secondary">Number your choices from 1. Leave the rest empty.</p>
+        <ul class="list-unstyled rank-field-list">
+            @foreach (var o in q.Options)
+            {
+                <li class="rank-field" @key="o.Key">
+                    <input id="pos-@o.Key" name="@(Preview ? null : BallotForm.Field(o.Key))" data-field="@BallotForm.Field(o.Key)" class="form-control rank-pos-input" type="number" inputmode="numeric"
+                           min="1" max="@q.Options.Count" step="1" value="@Values.Positions.GetValueOrDefault(o.Key)" />
+                    <span class="rank-label">
+                        <label class="fw-semibold" for="pos-@o.Key">@o.Label</label>
+                        @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
+                        {
+                            <details class="rank-details small">
+                                <summary>Details</summary>
+                                <div class="poll-markdown">@MarkdownRenderer.Render(o.DescriptionMarkdown)</div>
+                            </details>
+                        }
+                    </span>
+                    @if (q.MaxBans > 0)
+                    {
+                        <span class="form-check rank-field-ban">
+                            <input class="form-check-input" type="checkbox" id="ban-@o.Key" name="@(Preview ? null : BallotForm.BanField(o.Key))" data-field="@BallotForm.BanField(o.Key)" value="1"
+                                   checked="@Values.Banned.Contains(o.Key)" />
+                            <label class="form-check-label" for="ban-@o.Key">Ban<span class="visually-hidden"> @o.Label</span></label>
+                        </span>
+                    }
+                </li>
+            }
+        </ul>
+    </fieldset>
+
+    <div class="ballot-editor rank-board" data-rank-board hidden>
+        <section class="rank-section" aria-labelledby="zone-ranked-title">
+            <h2 id="zone-ranked-title" class="h5 zone-title">Your ranking <span class="badge text-bg-primary" data-count="ranked">@ranked.Count</span></h2>
+            <p class="zone-hint" data-empty="ranked" hidden="@(ranked.Count > 0)">Nothing ranked yet.</p>
+            <ol class="rank-zone zone-ranked list-unstyled" data-zone="ranked" aria-labelledby="zone-ranked-title">
+                @for (var i = 0; i < ranked.Count; i++)
+                {
+                    @Item(byKey[ranked[i]], i + 1)
+                }
+            </ol>
+        </section>
+
+        <section class="rank-section" aria-labelledby="zone-pool-title">
+            <h2 id="zone-pool-title" class="h5 zone-title">Not ranked <span class="badge text-bg-secondary" data-count="pool">@pool.Count</span></h2>
+            <p class="zone-hint" data-empty="pool" hidden="@(pool.Count > 0)">All placed.</p>
+            <ul class="rank-zone zone-pool list-unstyled" data-zone="pool" aria-labelledby="zone-pool-title">
+                @foreach (var key in pool)
+                {
+                    @Item(byKey[key], null)
+                }
+            </ul>
+        </section>
+
+        @if (q.MaxBans > 0)
+        {
+            <section class="rank-section" aria-labelledby="zone-banned-title">
+                <h2 id="zone-banned-title" class="h5 zone-title">Banned <span class="small fw-normal text-secondary"><span data-count="banned">@banned.Count</span> of @q.MaxBans @(q.MaxBans == 1 ? "ban" : "bans") used</span></h2>
+                <p class="zone-hint" data-empty="banned" hidden="@(banned.Count > 0)">No bans.</p>
+                <ul class="rank-zone zone-banned list-unstyled" data-zone="banned" aria-labelledby="zone-banned-title">
+                    @foreach (var key in banned)
+                    {
+                        @Item(byKey[key], null)
+                    }
+                </ul>
+            </section>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public BallotForm Values { get; set; } = default!;
+    /// <summary>The home page example (DESIGN.md §23.2): the same fields without names, so nothing can be posted.</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    private PollQuestion q => Question;
+    private Dictionary<string, PollOption> byKey = new(StringComparer.Ordinal);
+    private Dictionary<string, int> order = new(StringComparer.Ordinal);
+    private List<string> ranked = [], pool = [], banned = [];
+
+    protected override void OnParametersSet()
+    {
+        byKey = q.Options.ToDictionary(o => o.Key, StringComparer.Ordinal);
+        order = q.Options.Select((o, i) => (o.Key, i)).ToDictionary(x => x.Key, x => x.i, StringComparer.Ordinal);
+        ranked = Values.RankedOrder(q);
+        banned = q.MaxBans > 0 ? q.Options.Select(o => o.Key).Where(k => Values.Banned.Contains(k) && !ranked.Contains(k)).ToList() : [];
+        pool = q.Options.Select(o => o.Key).Where(k => !ranked.Contains(k) && !banned.Contains(k)).ToList();
+    }
+
+    /// <summary>"3 ranked · 1/2 bans" for the submit bar (ranking.js keeps it current).</summary>
+    public static string Tally(PollQuestion q, BallotForm values)
+    {
+        var ranked = values.RankedOrder(q);
+        var bans = values.Banned.Count(k => !ranked.Contains(k));
+        return $"{ranked.Count} ranked" + (q.MaxBans > 0 ? $" · {bans}/{q.MaxBans} bans" : "");
+    }
+
+    private RenderFragment ItemLabel(PollOption o) => __builder =>
+    {
+        <span class="rank-label">
+            <span class="fw-semibold">@o.Label</span>
+            @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
+            {
+                <details class="rank-details small">
+                    <summary>Details</summary>
+                    <div class="poll-markdown">@MarkdownRenderer.Render(o.DescriptionMarkdown)</div>
+                </details>
+            }
+        </span>
+    };
+
+    /// <param name="position">1-based position in the ranked zone; null elsewhere.</param>
+    private RenderFragment Item(PollOption o, int? position) => __builder =>
+    {
+        var index = order[o.Key];
+        <li class="rank-item" data-key="@o.Key" data-index="@index" data-label="@o.Label" @key="o.Key">
+            <span class="drag-handle" aria-hidden="true">⠿</span>
+            <span class="@(position == 1 ? "rank-pos rank-pos-first" : "rank-pos")" data-pos>@position</span>
+            @ItemLabel(o)
+            <span class="rank-actions">
+                <button type="button" class="btn btn-outline-secondary rank-btn" data-action="up" aria-label="Move @o.Label up">▲</button>
+                <button type="button" class="btn btn-outline-secondary rank-btn" data-action="down" aria-label="Move @o.Label down">▼</button>
+                <button type="button" class="btn btn-outline-secondary rank-btn" data-action="unrank" aria-label="Remove @o.Label from your ranking">Unrank</button>
+                <button type="button" class="btn btn-outline-primary rank-btn" data-action="rank" aria-label="Add @o.Label to your ranking">Rank</button>
+                @if (q.MaxBans > 0)
+                {
+                    <button type="button" class="btn btn-outline-danger rank-btn" data-action="ban" aria-label="Ban @o.Label">Ban</button>
+                    <button type="button" class="btn btn-outline-secondary rank-btn" data-action="unban" aria-label="Unban @o.Label">Unban</button>
+                }
+            </span>
+        </li>
+    };
+}

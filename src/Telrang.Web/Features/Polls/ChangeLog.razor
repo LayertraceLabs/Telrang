@@ -1,0 +1,33 @@
+@* The poll's change log (DESIGN.md §26, §31): changes made after the first ballot, oldest first, for everyone who can
+   view the poll; at most the newest PollChange.ShownEntries, with the total above them. Ballot counts on removals only
+   for viewers who can see the results. Static markup, no script; nothing when the log is empty. *@
+@if (Log.Entries.Count > 0)
+{
+    <section class="change-log mb-3" aria-labelledby="change-log-heading">
+        <h2 class="h6 mb-1" id="change-log-heading">Changed after voting started</h2>
+        @if (Log.Total > Shown)
+        {
+            <p class="small text-secondary mb-1">Newest @Shown of @Log.Total changes.</p>
+        }
+        <ul class="small mb-0 change-log-list">
+            @foreach (var c in Log.Entries)
+            {
+                <li @key="c.Id"><ChangeLine Kind="c.Kind" Label="@c.Label" OldLabel="@c.OldLabel"
+                    BallotCount="@(c.Kind == OptionChangeKind.Removed && !ShowCounts ? null : c.BallotCount)" />
+                    <span class="text-secondary">· @PollTime.Format(c.At, ZoneId)</span></li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public ChangeLogPage Log { get; set; } = ChangeLogPage.Empty;
+
+    /// <summary>IANA zone the times are shown in (the viewer's, else the poll's).</summary>
+    [Parameter] public string? ZoneId { get; set; }
+
+    /// <summary>Show how many ballots answered a removed option (<see cref="PollAccess.CanSeeResults"/>).</summary>
+    [Parameter] public bool ShowCounts { get; set; }
+
+    private int Shown => Log.Entries.Sum(c => c.Kind == OptionChangeKind.Earlier ? c.BallotCount ?? 0 : 1);
+}

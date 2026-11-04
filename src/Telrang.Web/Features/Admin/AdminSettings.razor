@@ -1,0 +1,575 @@
+@inherits AdminTabBase
+@using Telrang.Web.Features.Branding
+@implements IAsyncDisposable
+@inject SettingsService Settings
+@inject BrandingService Branding
+@inject ThemeService Theme
+@inject IJSRuntime JS
+@inject Telrang.Web.Data.DatabaseSetup Database
+
+<h2 class="visually-hidden">Settings</h2>
+<AdminStatus Message="@StatusMessage" Ok="@StatusOk" />
+
+<form class="mb-4" @onsubmit="SaveAsync">
+    <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" role="switch" id="setting-registration" @bind="registration" />
+        <label class="form-check-label" for="setting-registration">Open registration</label>
+        <OptionHelp Label="Open registration">
+            <p>Anyone can create an account at /Account/Register; the sign-in and home pages link to it. Off (the default): the
+                page returns 404 and accounts come only from <em>Create account</em> and <em>Invite</em> on the Users tab.</p>
+            <p>A self-registered account can sign in only after its email is verified: by the mailed link, or by
+                <em>Mark verified</em> while mail is not configured. Accounts still unverified after 7 days are deleted. During
+                their first 24 hours they get half of the open-poll and new-poll limits. The form has bot checks (hidden field,
+                minimum fill time) and shares the sign-in rate limit; no 2FA is required for these accounts.</p>
+            <p>With registration open and mail not configured, every new account waits for an admin; the Status tab warns
+                about it.</p>
+        </OptionHelp>
+    </div>
+    <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" role="switch" id="setting-autoverify" disabled="@mailConfigured" @bind="autoVerify" />
+        <label class="form-check-label" for="setting-autoverify">Auto-verify created accounts</label>
+        <OptionHelp Label="Auto-verify created accounts">
+            <p>For accounts made with <em>Create account</em> (a setup link without email): when the person completes the link
+                while mail is not configured, the email they type is stored as verified and no verification mail is queued.
+                After setting up their authenticator they can create polls at once, without an admin clicking
+                <em>Mark verified</em>. Default off.</p>
+            <p>Both conditions are read when the link is completed, not when it is issued. Not affected: self-registration,
+                email invites (already verified by the link), email changes, accounts that exist already.</p>
+            <p>Nobody checks the address: a typo or someone else's address is kept as typed. If mail is set up later, these
+                accounts count as verified and receive mail at that address (results-ready notices, admin reset links).</p>
+            <p>No effect while mail is configured: a verification mail is sent instead, and the switch is disabled.</p>
+        </OptionHelp>
+        @if (mailConfigured)
+        {
+            <div class="form-text">No effect while mail is configured.</div>
+        }
+    </div>
+    <div class="mb-3 option-field">
+        <label for="setting-name" class="form-label">Display name</label>
+        <OptionHelp Label="Display name">
+            <p>The site's name in page titles, in the header (unless a logo is uploaded), on the home page and in the subject
+                and text of every mail. Empty: the configured <code>App:Name</code>, shown as the placeholder. 60 characters at
+                most.</p>
+        </OptionHelp>
+        <input id="setting-name" class="form-control" maxlength="60" placeholder="@configName" @bind="displayName" />
+    </div>
+    <div class="mb-3 option-field">
+        <label for="setting-url" class="form-label">Public URL</label>
+        <OptionHelp Label="Public URL">
+            <p>The address people reach this site at, such as https://vote.example.com: https, or http only for localhost;
+                without query or fragment.</p>
+            <p>Every link in a mail is built from it and never from the request, so without it no mail is queued at all
+                (mail counts as not configured). Share, invite, setup and reset links shown on pages use it too; while it is
+                empty they use the address the request came in on.</p>
+            <p>Once set, requests for any other host name are refused (400), except localhost and loopback addresses and
+                <code>/healthz</code>. Saving refuses a host other than the one this page is open on, unless it is open on a
+                loopback address, so the setting cannot lock you out. Default empty.</p>
+        </OptionHelp>
+        <input id="setting-url" type="url" class="form-control" placeholder="@Nav.BaseUri.TrimEnd('/')" @bind="publicUrl" />
+    </div>
+    <div class="mb-3 option-field">
+        <label for="setting-legal" class="form-label">About / privacy page (Markdown)</label>
+        <OptionHelp Label="About / privacy page">
+            <p>Shown at <a href="about">/about</a>. While it is not empty, the footer of every page links to it as "About and
+                privacy" and the cookie note on the vote page links to it; empty, /about returns 404.</p>
+            <p>Markdown with HTML disabled. The place for the operator, a contact and the privacy notes: the cookies used, what
+                mail is sent, and the captcha provider when one is enabled.</p>
+        </OptionHelp>
+        <textarea id="setting-legal" class="form-control font-monospace" rows="8" @bind="legal"></textarea>
+    </div>
+    <div class="mb-3 option-field">
+        <label for="setting-welcome" class="form-label">Welcome text (Markdown)</label>
+        <OptionHelp Label="Welcome text">
+            <p>Shown on the home page under the banner and the site name, to everyone including visitors who are not signed in.
+                Empty: the default line. Markdown with HTML disabled, 8 kB at most.</p>
+        </OptionHelp>
+        <textarea id="setting-welcome" class="form-control font-monospace" rows="5" maxlength="@ThemeSettings.MaxWelcomeBytes" @bind="welcome"></textarea>
+    </div>
+    <div class="mb-3 option-field">
+        <label for="setting-retention" class="form-label">Delete closed polls after (days)</label>
+        <OptionHelp Label="Delete closed polls after">
+            <p>Polls are deleted with their ballots and invite links this many days after they closed, by hand or by their close
+                date. 0 or empty (the default): never.</p>
+            <p>Checked once a day, also for polls that closed before the setting was changed: lowering it deletes every poll
+                closed longer ago at the next daily pass. Owners are not mailed; their share page shows the deletion date while
+                this is on. Deleted polls come back only from a backup.</p>
+        </OptionHelp>
+        <input id="setting-retention" type="number" min="0" class="form-control" placeholder="0" @bind="retentionDays" />
+    </div>
+    <details class="mb-3">
+        <summary>Captcha</summary>
+        <div class="row g-2 mt-1">
+            <div class="col-12 col-sm-4 option-field">
+                <label for="captcha-provider" class="form-label small mb-0">Provider</label>
+                <OptionHelp Label="Captcha provider">
+                    <p>Asks anonymous voters in polls open to the public to pass Cloudflare Turnstile or hCaptcha before their
+                        ballot is saved. Never on sign-in or registration, never for signed-in voters or invite links. None (the
+                        default) turns it off; it is on only with a provider, a site key and a secret.</p>
+                    <p>Voters' browsers then load the provider's script and contact its servers, which see their IP address and
+                        may set cookies; say so on the about / privacy page. Anonymous voting in those polls then needs
+                        JavaScript. The ballot is checked with the provider without the voter's address; while the provider
+                        cannot be reached, those votes are refused.</p>
+                </OptionHelp>
+                <select id="captcha-provider" class="form-select form-select-sm" @bind="captchaProvider">
+                    <option value="@CaptchaProvider.None">None</option>
+                    <option value="@CaptchaProvider.Turnstile">Cloudflare Turnstile</option>
+                    <option value="@CaptchaProvider.HCaptcha">hCaptcha</option>
+                </select>
+            </div>
+            <div class="col-12 col-sm-4 option-field">
+                <label for="captcha-site" class="form-label small mb-0">Site key</label>
+                <OptionHelp Label="Captcha site key">
+                    <p>The public key from the provider's dashboard, for this site's host name. It is sent to voters' browsers.
+                        Required with a provider.</p>
+                </OptionHelp>
+                <input id="captcha-site" class="form-control form-control-sm" autocomplete="off" @bind="captchaSiteKey" />
+            </div>
+            <div class="col-12 col-sm-4 option-field">
+                <label for="captcha-secret" class="form-label small mb-0">Secret</label>
+                <OptionHelp Label="Captcha secret">
+                    <p>The provider's secret key, used by the server only. Stored encrypted with the Data Protection keys and never
+                        shown again; empty keeps the stored one. Required with a provider.</p>
+                </OptionHelp>
+                <input id="captcha-secret" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="@(captchaHasSecret ? "unchanged" : "")" @bind="captchaSecret" />
+            </div>
+        </div>
+    </details>
+    <details class="mb-3">
+        <summary>Limits</summary>
+        <div class="row g-2 mt-1">
+            @foreach (var (key, label, def, help) in LimitSettings.Fields)
+            {
+                <div class="col-12 col-sm-6 col-lg-4 option-field">
+                    <label for="limit-@key" class="form-label small mb-0">@label</label>
+                    <OptionHelp Label="@label"><p>@help Default @def.</p></OptionHelp>
+                    <input id="limit-@key" type="number" min="0" max="@(LimitSettings.Ceilings.TryGetValue(key, out var ceiling) ? ceiling : null)" class="form-control form-control-sm" placeholder="@def"
+                           value="@limits.GetValueOrDefault(key)" @onchange="e => limits[key] = e.Value?.ToString()" />
+                </div>
+            }
+        </div>
+    </details>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="submit" class="btn btn-primary" disabled="@Busy">Save</button>
+        <OptionHelp Label="Save">
+            <p>Not the theme: it has its own save. The admin log records which settings changed, never the value of a secret.</p>
+        </OptionHelp>
+    </div>
+</form>
+
+<div class="d-flex flex-wrap align-items-center gap-1 mb-1">
+    <h3 class="h5 mb-0">Branding</h3>
+    <OptionHelp Label="Branding">
+        <p>Images are checked by their content: PNG, JPEG or WebP (favicon PNG only); SVG and everything else is refused.
+            Logo and banner 1 MB, background 2 MB, favicon 256 kB. They are stored with fixed names in
+            <code class="text-break">@Branding.Folder</code> and served to everyone, signed in or not. A file replaced by hand
+            in that folder is picked up too; one that fails the check is not served.</p>
+        <p><em>Remove</em> deletes the file at once. Uploads and removals are logged.</p>
+    </OptionHelp>
+</div>
+<div class="mb-4">
+    @foreach (var name in BrandingService.Names)
+    {
+        var url = Branding.Url(name);
+        <div class="branding-row option-field" @key="name">
+            <label for="branding-@name" class="form-label mb-1">@BrandingService.Label(name)</label>
+            <OptionHelp Label="@BrandingService.Label(name)"><p>@BrandingHelp(name)</p></OptionHelp>
+            @if (url is not null)
+            {
+                <div><img class="branding-preview mb-2" src="@url" alt="@BrandingService.Label(name) preview" /></div>
+            }
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <InputFile id="@("branding-" + name)" class="form-control form-control-sm w-auto mw-100" accept="@BrandingService.Accept(name)"
+                           disabled="@Busy" OnChange="e => UploadAsync(name, e)" />
+                @if (url is not null)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@Busy" @onclick="() => RemoveAsync(name)">Remove</button>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<h3 class="h5">Theme</h3>
+<form class="mb-4" @onsubmit="SaveThemeAsync">
+    <div class="row g-3">
+        <div class="col-12 col-sm-6 col-lg-4 option-field">
+            <label for="theme-layout" class="form-label">Layout</label>
+            <OptionHelp Label="Layout">
+                <p>The frame of the signed-in pages. Top bar (the default): header with the navigation and the account menu.
+                    Sidebar: a 240 px column with grouped navigation and <em>New poll</em>. Compact: a 56 px strip and a narrow
+                    column, for small sites built around forms.</p>
+                <p>Voting, results, sign-in and other pages for visitors always use the slim public header. Saving a different
+                    layout reloads this page.</p>
+            </OptionHelp>
+            <select id="theme-layout" class="form-select" @bind="layout">
+                @foreach (var (_, value, label) in ThemeSettings.Layouts)
+                {
+                    <option value="@value">@label</option>
+                }
+            </select>
+        </div>
+        <div class="col-12 col-sm-6 col-lg-4 option-field">
+            <label for="theme-preset" class="form-label">Default mode</label>
+            <OptionHelp Label="Default mode">
+                <p>The mode of a visitor who has not chosen one with the switch in the header. System (the default) follows
+                    the visitor's device setting; Light and Dark start everyone in that mode.</p>
+                <p>The visitor's choice is kept in their browser (a cookie, no account setting) and wins over this one.</p>
+            </OptionHelp>
+            <select id="theme-preset" class="form-select" @bind="preset">
+                @foreach (var (_, value, label) in ThemeSettings.Presets)
+                {
+                    <option value="@value">@label</option>
+                }
+            </select>
+        </div>
+        <div class="col-12 col-sm-6 col-lg-4 option-field">
+            <label for="theme-font" class="form-label">Font</label>
+            <OptionHelp Label="Font">
+                <p>One of four font lists that use fonts already installed on the visitor's device (System UI is the default);
+                    no web font is downloaded, so no font service sees your visitors.</p>
+            </OptionHelp>
+            <select id="theme-font" class="form-select" @bind="font">
+                @foreach (var f in ThemeSettings.Fonts)
+                {
+                    <option value="@f.Value">@f.Label</option>
+                }
+            </select>
+        </div>
+        <fieldset class="col-12">
+            <legend class="visually-hidden">Colours</legend>
+            <div class="option-field">
+                <span class="form-label fs-6" aria-hidden="true">Colours</span>
+                <OptionHelp Id="theme-colours" Label="Colours">
+                    <p>Every colour of the site is derived from two per mode, base and highlight, with text contrast raised
+                        until it meets WCAG AA. The base carries buttons, links, the brand mark, result bars, the active
+                        navigation item and the Sidebar layout; the highlight is used sparingly: the band on top of the header,
+                        focus rings, the first-place badge and the leading result bar.</p>
+                    <p>The built-in colours are Teal / Coral in both modes. A colour set here replaces the built-in one for
+                        that mode only; <em>Reset</em> next to it returns to the built-in colour. The base's lightness is
+                        adjusted per mode so that text on it stays readable. Applies to every page, admin pages included.</p>
+                </OptionHelp>
+                <div class="theme-colours">
+                    @foreach (var (key, label, builtIn) in ThemeSettings.ColourKeys)
+                    {
+                        var id = "theme-" + key[(key.IndexOf('.') + 1)..].ToLowerInvariant();
+                        var value = colours[key];
+                        var overridden = !Same(value, builtIn);
+                        <div class="theme-colour" @key="key">
+                            <label for="@id" class="form-label mb-1" data-help="theme-colours">@label</label>
+                            <div class="d-flex align-items-center gap-2">
+                                <input id="@id" type="color" class="form-control form-control-color theme-swatch" value="@value"
+                                       @onchange="e => colours[key] = e.Value?.ToString() ?? builtIn" />
+                                <span class="font-monospace small">@value</span>
+                                @if (overridden)
+                                {
+                                    <button type="button" class="btn btn-link btn-sm p-0" aria-label="@($"Reset {label}")" @onclick="() => colours[key] = builtIn">Reset</button>
+                                }
+                                else
+                                {
+                                    <span class="small text-body-secondary">built-in</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </fieldset>
+        <div class="col-12 col-sm-6 option-field">
+            <label for="theme-size" class="form-label">Font size: @fontSize px</label>
+            <OptionHelp Label="Font size">
+                <p>Base text size, @ThemeSettings.MinFontSize to @ThemeSettings.MaxFontSize px; default
+                    @ThemeSettings.DefaultFontSize px. Applied as a percentage, so a visitor's own browser text size still
+                    scales it.</p>
+            </OptionHelp>
+            <input id="theme-size" type="range" class="form-range" min="@ThemeSettings.MinFontSize" max="@ThemeSettings.MaxFontSize" @bind="fontSize" @bind:event="oninput" />
+        </div>
+        <div class="col-12 col-sm-6">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="theme-bg" @bind="backgroundEnabled" />
+                <label class="form-check-label" for="theme-bg">Background image</label>
+                <OptionHelp Label="Background image">
+                    <p>Shows the uploaded background (Branding) behind every page, admin pages included, scaled to cover the
+                        window, under the overlay. Off by default; without an uploaded background nothing changes.</p>
+                </OptionHelp>
+            </div>
+            @if (backgroundEnabled && Branding.Get(BrandingService.Background) is null)
+            {
+                <div class="form-text">Upload a background above.</div>
+            }
+        </div>
+        <div class="col-12 col-sm-6 option-field">
+            <label for="theme-overlay" class="form-label">Overlay: @overlay %</label>
+            <OptionHelp Label="Overlay">
+                <p>How strongly the page colour (light or dark) covers the background image, @ThemeSettings.MinOverlay to
+                    @ThemeSettings.MaxOverlay %; default @ThemeSettings.DefaultOverlay %. Higher keeps text readable. No effect
+                    without the background image.</p>
+            </OptionHelp>
+            <input id="theme-overlay" type="range" class="form-range" min="@ThemeSettings.MinOverlay" max="@ThemeSettings.MaxOverlay" step="5" @bind="overlay" @bind:event="oninput" />
+        </div>
+    </div>
+    <details class="my-3">
+        <summary>Advanced: custom CSS, applied as-is</summary>
+        <OptionHelp Label="Custom CSS">
+            <p>Up to 20 kB of CSS appended to the theme stylesheet without any check. Not applied on admin, account
+                (/Account), setup, notification and error pages, so a broken rule cannot hide the controls that fix it.</p>
+            <p>It can restyle or hide anything on the other pages, including the vote form. The Content Security Policy still
+                applies: images and fonts load only from this site, and CSS cannot run scripts. Empty the field to remove
+                it.</p>
+        </OptionHelp>
+        <textarea id="theme-css-input" class="form-control font-monospace mt-2" rows="8" aria-label="Custom CSS" @bind="customCss"></textarea>
+    </details>
+    <div class="theme-preview card card-body mb-3">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="rank-pos rank-pos-first">1</span>
+            <span class="rank-pos">2</span>
+            <span class="badge badge-open">Open</span>
+            <button type="button" class="btn btn-primary btn-sm" tabindex="-1">Primary</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" tabindex="-1">Outline</button>
+            <a href="admin?tab=settings" tabindex="-1">Link</a>
+            <input class="form-check-input" type="checkbox" checked aria-label="Sample checkbox" tabindex="-1" />
+        </div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="submit" class="btn btn-primary" disabled="@Busy">Save theme</button>
+        <button type="button" class="btn btn-outline-secondary" disabled="@Busy" @onclick="ResetThemeAsync">Reset</button>
+        <OptionHelp Label="Save theme and Reset">
+            <p>Other pages show a saved theme on their next load. <em>Reset</em> returns the colours, font size and font to their defaults
+                and keeps layout, default mode, background and custom CSS. Both are logged.</p>
+        </OptionHelp>
+    </div>
+</form>
+
+<h3 class="h5">Backup</h3>
+@if (Database.IsPostgres)
+{
+    <p class="mb-0" data-backup="postgres">PostgreSQL: <code>pg_dump</code>, plus the data directory's <code>keys</code> folder (docs/deploy).</p>
+}
+else
+{
+<form action="admin/backup" method="post" class="d-flex flex-wrap align-items-center gap-2" data-enhance="false">
+    <AntiforgeryToken />
+    <button type="submit" class="btn btn-outline-primary">Download backup</button>
+    <OptionHelp Label="Download backup">
+        <p>Downloads a consistent copy of the SQLite database, made while the site keeps running: accounts with emails and
+            password hashes, polls, ballots with voter names, invite links, settings and the admin log. Keep it as private as
+            the server.</p>
+        <p>Not included: the <code>keys</code> folder of the data directory (Data Protection keys) and the branding images.
+            The 2FA secrets, the SMTP password and the captcha secret in the copy are encrypted with those keys, and sign-in
+            and voter cookies depend on them: back up the folder too, stored apart from the database. A restore without it
+            signs everyone out and loses those secrets.</p>
+        <p>One download per minute; each download is logged.</p>
+    </OptionHelp>
+</form>
+}
+
+@code {
+    private bool registration;
+    private bool autoVerify;
+    private bool mailConfigured;
+    private string? displayName;
+    private string? publicUrl;
+    private string? legal;
+    private string configName = "";
+    private Dictionary<string, string?> limits = new();
+    private CaptchaProvider captchaProvider;
+    private string? captchaSiteKey;
+    private string? captchaSecret;
+    private bool captchaHasSecret;
+    private string? welcome;
+    private string? retentionDays;
+    private string layout = "topbar";
+    private string preset = "system";
+    private string font = "system-ui";
+    /// <summary>The four colour fields by setting key: the override, else the built-in colour.</summary>
+    private Dictionary<string, string> colours = ThemeSettings.ColourKeys.ToDictionary(c => c.Key, c => c.BuiltIn);
+    private int fontSize = ThemeSettings.DefaultFontSize;
+    private bool backgroundEnabled;
+    private int overlay = ThemeSettings.DefaultOverlay;
+    private string? customCss;
+    private IJSObjectReference? themeModule;
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        var s = Settings.Current;
+        registration = s.RegistrationEnabled;
+        autoVerify = s.AutoVerifyWithoutMail;
+        mailConfigured = s.Mail.IsConfigured;
+        displayName = s.DisplayName;
+        publicUrl = s.PublicUrl;
+        legal = s.LegalPageMarkdown;
+        configName = Settings.AppName;
+        limits = LimitSettings.Fields.ToDictionary(f => f.Key, f => s.Raw.GetValueOrDefault(f.Key));
+        (captchaProvider, captchaSiteKey, captchaHasSecret, captchaSecret) = (s.Captcha.Provider, s.Captcha.SiteKey, s.Captcha.HasSecret, null);
+        welcome = s.WelcomeMarkdown;
+        retentionDays = s.RetentionDays > 0 ? s.RetentionDays.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+        var t = s.Theme;
+        layout = t.LayoutValue;
+        colours = ThemeSettings.ColourKeys.ToDictionary(c => c.Key, c => t.Override(c.Key) ?? c.BuiltIn);
+        (preset, font, fontSize) = (t.PresetValue, t.FontValue, t.FontSize);
+        (backgroundEnabled, overlay, customCss) = (t.BackgroundEnabled, t.BackgroundOverlay, t.CustomCss);
+    }
+
+    /// <summary>Theme keys as stored; defaults are stored as "no row". The keys of before §24.4 are removed.</summary>
+    private Dictionary<string, string?> ThemeValues()
+    {
+        var values = ThemeFieldValues();
+        foreach (var (key, _, builtIn) in ThemeSettings.ColourKeys)
+            values[key] = Same(colours[key], builtIn) || !ThemeSettings.IsHex(colours[key]) ? null : colours[key].Trim().ToLowerInvariant();
+        foreach (var legacy in LegacyKeys) values[legacy] = null;
+        return values;
+    }
+
+    private static readonly string[] LegacyKeys =
+        [SettingKeys.LegacyThemePalette, SettingKeys.LegacyThemePrimary, SettingKeys.LegacyThemeAccent, SettingKeys.LegacyThemeRadius];
+
+    private Dictionary<string, string?> ThemeFieldValues() => new()
+    {
+        [SettingKeys.ThemeLayout] = layout == ThemeSettings.Default.LayoutValue ? null : layout,
+        [SettingKeys.ThemePreset] = preset == "system" ? null : preset,
+        [SettingKeys.ThemeFontStack] = font == ThemeSettings.Default.FontValue ? null : font,
+        [SettingKeys.ThemeFontSize] = fontSize == ThemeSettings.DefaultFontSize ? null : fontSize.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        [SettingKeys.ThemeBackgroundEnabled] = backgroundEnabled ? "true" : null,
+        [SettingKeys.ThemeBackgroundOverlay] = overlay == ThemeSettings.DefaultOverlay ? null : overlay.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        [SettingKeys.ThemeCustomCss] = customCss,
+    };
+
+    private static string BrandingHelp(string name) => name switch
+    {
+        BrandingService.Logo => "Replaces the ballot-box mark and the site name in the header of every page; its alternative text is the display name. PNG, JPEG or WebP, 1 MB at most.",
+        BrandingService.Banner => "A wide image at the top of the home page, above the site name. PNG, JPEG or WebP, 1 MB at most.",
+        BrandingService.Favicon => "The icon in browser tabs and bookmarks. PNG only, 256 kB at most. Without it the icon is the brand mark in the theme's colours.",
+        _ => "The page background, shown only while Background image is on in the theme below. PNG, JPEG or WebP, 2 MB at most.",
+    };
+
+    private static bool Same(string? a, string b) => string.Equals(a?.Trim(), b, StringComparison.OrdinalIgnoreCase);
+
+    private async Task SaveThemeAsync()
+    {
+        var layoutBefore = Settings.Current.Theme.Layout;
+        await RunAsync((a, c) => a.SaveSettingsAsync(c, ThemeValues(), "settings.theme"));
+        if (!StatusOk) return;
+        // The app shell is chosen by MainLayout, outside this tab: a new layout takes a page load to show.
+        if (Settings.Current.Theme.Layout != layoutBefore) await Telrang.Web.Components.Layout.PageReload.SoonAsync(JS); // §24.6
+        else await ApplyThemeAsync();
+    }
+
+    /// <summary>Back to the defaults: built-in colours, font size and font. Keeps default mode, layout, background and custom CSS.</summary>
+    private async Task ResetThemeAsync()
+    {
+        var values = new Dictionary<string, string?> { [SettingKeys.ThemeFontSize] = null, [SettingKeys.ThemeFontStack] = null };
+        foreach (var (key, _, _) in ThemeSettings.ColourKeys) values[key] = null;
+        foreach (var legacy in LegacyKeys) values[legacy] = null;
+        await RunAsync((a, c) => a.SaveSettingsAsync(c, values, "settings.theme-reset"));
+        if (StatusOk) await ApplyThemeAsync();
+    }
+
+    /// <summary>Re-links the admin variant of /branding/theme.css with its new version (no inline style) and passes the default mode (the visitor's own choice still wins).</summary>
+    private async Task ApplyThemeAsync()
+    {
+        try
+        {
+            themeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/theme.js");
+            await themeModule.InvokeVoidAsync("apply", Theme.AdminUrl, Theme.Settings.BootstrapTheme);
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { } // theme.js failed (DESIGN.md §23.1): the new theme shows on the next page load
+    }
+
+    private async Task UploadAsync(string name, InputFileChangeEventArgs e)
+    {
+        var max = BrandingService.MaxBytes(name);
+        if (e.File.Size > max)
+        {
+            StatusMessage = $"{BrandingService.Label(name)}: choose a file of {BrandingService.MaxText(name)} or less.";
+            StatusOk = false;
+            return;
+        }
+        await RunAsync(async (a, c) =>
+        {
+            await using var stream = e.File.OpenReadStream(max);
+            return await a.SaveBrandingAsync(c, name, stream);
+        });
+        if (StatusOk && name == BrandingService.Background) await ApplyThemeAsync();
+    }
+
+    private async Task RemoveAsync(string name)
+    {
+        await RunAsync((a, c) => a.DeleteBrandingAsync(c, name));
+        if (StatusOk && name == BrandingService.Background) await ApplyThemeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (themeModule is not null)
+        {
+            try { await themeModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+            catch (JSException) { }
+        }
+    }
+
+    protected override Task OnActionDoneAsync()
+    {
+        Load();
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(publicUrl) && !(Uri.TryCreate(publicUrl.Trim(), UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"))
+        {
+            StatusMessage = "Public URL must start with https:// or http://.";
+            StatusOk = false;
+            return;
+        }
+        // Once set, requests for other host names are refused (pentest AV-01): saving a host this page is not open on
+        // would lock the admin out, unless they are on a loopback address.
+        var here = new Uri(Nav.BaseUri).Host;
+        if (!string.IsNullOrWhiteSpace(publicUrl) && !SettingsService.IsLoopbackHost(here)
+            && !string.Equals(new Uri(publicUrl.Trim()).Host, here, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(new Uri(publicUrl.Trim()).IdnHost, here, StringComparison.OrdinalIgnoreCase))
+        {
+            StatusMessage = $"Public URL must use the host this page is open on ({here}).";
+            StatusOk = false;
+            return;
+        }
+        foreach (var (key, value) in limits)
+        {
+            if (!string.IsNullOrWhiteSpace(value) && !(int.TryParse(value, out var n) && n >= 0))
+            {
+                StatusMessage = $"{LimitSettings.Fields.First(f => f.Key == key).Label}: enter a whole number.";
+                StatusOk = false;
+                return;
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(retentionDays) && !(int.TryParse(retentionDays, out var days) && days >= 0))
+        {
+            StatusMessage = "Delete closed polls after: enter a whole number of days.";
+            StatusOk = false;
+            return;
+        }
+        var values = new Dictionary<string, string?>
+        {
+            [SettingKeys.RetentionDeleteClosedAfterDays] = retentionDays?.Trim() is "0" ? null : retentionDays,
+            [SettingKeys.RegistrationEnabled] = registration ? "true" : null,
+            [SettingKeys.AutoVerifyWithoutMail] = autoVerify ? "true" : null,
+            [SettingKeys.DisplayName] = displayName,
+            [SettingKeys.PublicUrl] = publicUrl,
+            [SettingKeys.LegalPageMarkdown] = legal,
+            [SettingKeys.HomeWelcomeMarkdown] = welcome,
+        };
+        foreach (var (key, value) in limits) values[key] = value;
+        values[SettingKeys.CaptchaProvider] = captchaProvider == CaptchaProvider.None ? null : captchaProvider.ToString();
+        values[SettingKeys.CaptchaSiteKey] = captchaSiteKey;
+        if (!string.IsNullOrEmpty(captchaSecret)) values[SettingKeys.CaptchaSecret] = captchaSecret;
+        if (captchaProvider != CaptchaProvider.None && (string.IsNullOrWhiteSpace(captchaSiteKey) || !(captchaHasSecret || !string.IsNullOrEmpty(captchaSecret))))
+        {
+            StatusMessage = "Captcha needs a site key and a secret.";
+            StatusOk = false;
+            return;
+        }
+        await RunAsync((a, c) => a.SaveSettingsAsync(c, values, "settings.save"));
+    }
+}

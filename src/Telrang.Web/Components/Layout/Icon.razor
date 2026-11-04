@@ -1,0 +1,7 @@
+@* One icon from wwwroot/icons.svg (no icon font, no CDN). Decorative: the text next to it carries the meaning. *@
+<svg class="icon @Class" aria-hidden="true" focusable="false"><use href="@($"{Assets["icons.svg"]}#{Name}")"></use></svg>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public string? Class { get; set; }
+}

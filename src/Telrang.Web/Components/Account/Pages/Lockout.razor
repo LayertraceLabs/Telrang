@@ -1,0 +1,17 @@
+@page "/Account/Lockout"
+
+<PageTitle>Locked out</PageTitle>
+
+<h1>Locked out</h1>
+@if (By == "admin")
+{
+    <p class="text-danger" role="alert">An admin locked this account. Ask an admin to unlock it.</p>
+}
+else
+{
+    <p class="text-danger" role="alert">Too many failed sign-ins. Try again in 15 minutes, or <a href="Account/ForgotPassword">reset your password</a>.</p>
+}
+
+@code {
+    [SupplyParameterFromQuery] private string? By { get; set; }
+}

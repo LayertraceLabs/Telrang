@@ -1,0 +1,13 @@
+@inject SettingsService Settings
+
+<footer class="site-footer small">
+    <div class="shell-container site-footer-inner">
+        @if (Settings.Current.LegalPageMarkdown is not null)
+        {
+            <a href="about">About and privacy</a>
+        }
+        @* Names the software, not the instance (DESIGN.md §24.5): not configurable. *@
+        <span class="site-footer-credit"><a href="https://layertrace.eu" rel="noopener">Telrang by LayerTrace Labs</a> ·
+            <span title="@AppVersion.Informational">v@(AppVersion.Display)</span></span>
+    </div>
+</footer>

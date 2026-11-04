@@ -1,0 +1,104 @@
+@implements IDisposable
+@inject NavigationManager Navigation
+
+@* The signed-in account: a <details> dropdown (opens without JS; js/menus.js only closes it on outside click,
+   Escape and link clicks), or a plain block for the sidebar. Signed out: a "Log in" link back to this page.
+   Never the email (DESIGN.md §24.2): the display name, else the part before @, or only a generic avatar. *@
+<AuthorizeView>
+    <Authorized>
+        @{ var name = HeaderIdentity.Text(context.User); }
+        @if (Inline)
+        {
+            <div class="user-block">
+                <div class="user-id">
+                    @Avatar(name)
+                    <span class="user-name">@(name ?? "Account")</span>
+                </div>
+                <NavLink class="app-nav-link" href="Account/Manage"><Icon Name="user" /><span>Account</span></NavLink>
+                <form action="Account/Logout" method="post">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="ReturnUrl" value="@currentUrl" />
+                    <button type="submit" class="app-nav-link"><Icon Name="logout" /><span>Log out</span></button>
+                </form>
+            </div>
+        }
+        else
+        {
+            <details class="user-menu" data-menu>
+                <summary class="user-menu-toggle" aria-label="Account menu">
+                    @Avatar(name)
+                    @if (name is not null)
+                    {
+                        <span class="user-menu-name">@name</span>
+                    }
+                    <Icon Name="chevron-down" Class="user-menu-caret" />
+                </summary>
+                <div class="menu-panel menu-panel-end">
+                    <div class="menu-header">@(name ?? "Account")</div>
+                    @if (AppLinks)
+                    {
+                        <div class="@AppLinksClass">
+                            <a class="menu-item" href="polls"><Icon Name="polls" />My polls</a>
+                            <a class="menu-item" href="my/votes"><Icon Name="votes" />My votes</a>
+                            <AuthorizeView Policy="@AppPolicies.Admin" Context="admin">
+                                <a class="menu-item" href="admin"><Icon Name="admin" />Admin</a>
+                            </AuthorizeView>
+                            <div class="menu-divider"></div>
+                        </div>
+                    }
+                    <a class="menu-item" href="Account/Manage"><Icon Name="user" />Account</a>
+                    <form action="Account/Logout" method="post">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="ReturnUrl" value="@currentUrl" />
+                        <button type="submit" class="menu-item"><Icon Name="logout" />Log out</button>
+                    </form>
+                </div>
+            </details>
+        }
+    </Authorized>
+    <NotAuthorized>
+        @if (!OnAccountPage)
+        {
+            <a class="btn btn-sm btn-outline-primary user-login" href="@LoginHref"><Icon Name="login" />Log in</a>
+        }
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    /// <summary>Also list My polls, My votes and Admin (PublicLayout, and Compact on phones).</summary>
+    [Parameter] public bool AppLinks { get; set; }
+    /// <summary>Class on the app links group, e.g. <c>d-sm-none</c> when the header shows them at wider widths.</summary>
+    [Parameter] public string? AppLinksClass { get; set; }
+    /// <summary>A plain block (sidebar footer) instead of the dropdown.</summary>
+    [Parameter] public bool Inline { get; set; }
+
+    private string currentUrl = "";
+
+    private bool OnAccountPage => currentUrl.StartsWith("Account/", StringComparison.OrdinalIgnoreCase);
+
+    private string LoginHref => currentUrl.Length == 0 ? "Account/Login" : "Account/Login?ReturnUrl=" + Uri.EscapeDataString("/" + currentUrl);
+
+    /// <summary>The initial of the shown name, or the generic user icon when the name is hidden.</summary>
+    private static RenderFragment Avatar(string? name) => @<span class="@(name is null ? "user-avatar user-avatar-generic" : "user-avatar")" aria-hidden="true">@if (name is null)
+        {
+            <Icon Name="user" />
+        }
+        else
+        {
+            @HeaderIdentity.Initial(name)
+        }</span>;
+
+    protected override void OnInitialized()
+    {
+        currentUrl = Navigation.ToBaseRelativePath(Navigation.Uri);
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        currentUrl = Navigation.ToBaseRelativePath(e.Location);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}

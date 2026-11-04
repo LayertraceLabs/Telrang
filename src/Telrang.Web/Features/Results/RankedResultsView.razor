@@ -1,0 +1,140 @@
+@using Telrang.Core.Scoring
+@* Ranked results: score, first choices, bans, rank histogram. Bars are inline SVG (width/height
+   attributes, not style attributes, so the strict CSP style-src is respected). *@
+
+<details class="small mb-3">
+    <summary>How scoring works</summary>
+    <ul class="mb-0 mt-1">
+        @foreach (var line in PollText.ScoringDetails(Definition.Questions[0]))
+        {
+            <li>@line</li>
+        }
+    </ul>
+</details>
+
+@* Phones (< 576 px): one card per option instead of the wide table, so nothing scrolls sideways. *@
+<ol class="list-unstyled results-cards d-sm-none">
+    @{ var cardPlace = 0; double? cardPrevious = null; }
+    @for (var i = 0; i < Results.Rows.Count; i++)
+    {
+        var row = Results.Rows[i];
+        var rounded = Math.Round(row.Score, 9);
+        if (cardPrevious != rounded) cardPlace = i + 1;
+        cardPrevious = rounded;
+        <li class="card results-card" @key="row.Key">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-baseline gap-2">
+                    <span class="fw-semibold text-break">@cardPlace. @row.Label</span>
+                    <span class="font-monospace text-nowrap">@PollText.Score(row.Score, Definition.Questions[0].Scoring)</span>
+                </div>
+                @Bar(row, cardPlace == 1)
+                <div class="small text-secondary mt-1">1st @row.FirstChoiceCount · @row.BanCount @(row.BanCount == 1 ? "ban" : "bans")@(Results.VoterCount > 0 && row.BanCount > 0 ? $" ({Percent(row.BanCount)})" : "")</div>
+                <div class="small text-secondary mt-1"><abbr title="@RanksTip">Ranks</abbr></div>
+                <div>@Ranks(row.RankHistogram, Results.VoterCount)</div>
+            </div>
+        </li>
+    }
+</ol>
+
+<div class="table-responsive d-none d-sm-block">
+    <table class="table align-middle results-table">
+        <thead>
+            <tr>
+                <th scope="col">#</th>
+                <th scope="col" class="opt-col">Option</th>
+                <th scope="col" class="text-end">Score</th>
+                <th scope="col" class="text-end"><abbr title="Number of voters who ranked it first">1st</abbr></th>
+                <th scope="col" class="text-end">Bans</th>
+                <th scope="col"><abbr title="@RanksTip">Ranks</abbr></th>
+            </tr>
+        </thead>
+        <tbody>
+            @{ var place = 0; double? previous = null; }
+            @for (var i = 0; i < Results.Rows.Count; i++)
+            {
+                var row = Results.Rows[i];
+                var rounded = Math.Round(row.Score, 9);
+                if (previous != rounded) place = i + 1;
+                previous = rounded;
+                <tr @key="row.Key">
+                    <td>@place</td>
+                    <td class="opt-col">
+                        <span class="fw-semibold">@row.Label</span>
+                        @Bar(row, place == 1)
+                    </td>
+                    <td class="text-end font-monospace">@PollText.Score(row.Score, Definition.Questions[0].Scoring)</td>
+                    <td class="text-end">@row.FirstChoiceCount</td>
+                    <td class="text-end">@row.BanCount @if (Results.VoterCount > 0 && row.BanCount > 0) {<span class="small text-secondary">(@Percent(row.BanCount))</span>}</td>
+                    <td>
+                        @Ranks(row.RankHistogram, Results.VoterCount)
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public RankedResultSet Results { get; set; } = default!;
+
+    private const string RanksTip = "Voters per position, 1st on the left";
+
+    private double maxScore => Results.Rows.Count == 0 ? 0 : Results.Rows.Max(r => r.Score);
+
+    private static string Pct(double value, double max) => F(max <= 0 ? 0 : value / max * 100);
+
+    private static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <param name="lead">The leading option (first place, ties included): its bar takes the highlight colour.</param>
+    private RenderFragment Bar(RankedResultRow row, bool lead) => __builder =>
+    {
+        <svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+            <title>Score @PollText.Score(row.Score, Definition.Questions[0].Scoring) · 1st: @row.FirstChoiceCount · @row.BanCount @(row.BanCount == 1 ? "ban" : "bans")</title>
+            <rect class="bar-track" x="0" y="0" width="100" height="6" />
+            <rect class="@(lead ? "bar-fill bar-fill-lead" : "bar-fill")" x="0" y="0" width="@Pct(row.Score, maxScore)" height="6" />
+        </svg>
+    };
+
+    /// <summary>
+    /// How many voters put the option at each position, as an SVG histogram plus its text for screen readers. Positions
+    /// nobody chose draw no bar and are left out of the text (with 100 options the full set was 20 000 elements per page);
+    /// the histogram's own title names them on hover. A used position is hoverable over its full height (DESIGN.md §33).
+    /// </summary>
+    private static RenderFragment Ranks(int[] histogram, int voters) => __builder =>
+    {
+        var max = Math.Max(1, histogram.DefaultIfEmpty(0).Max());
+        var n = histogram.Length;
+        <svg class="histogram" viewBox="0 0 @(n * 10) 30" preserveAspectRatio="none" aria-hidden="true">
+            <title>@RanksTitle(histogram, voters)</title>
+            @for (var r = 0; r < n; r++)
+            {
+                if (histogram[r] == 0) continue;
+                var h = histogram[r] * 28.0 / max;
+                <g>
+                    <title>@PollText.Ordinal(r + 1): @PollText.VotersShare(histogram[r], voters)</title>
+                    <rect class="hist-hit" x="@(r * 10)" y="0" width="10" height="30" />
+                    <rect class="hist-bar" x="@(r * 10 + 1)" y="@F(30 - h)" width="8" height="@F(h)" />
+                </g>
+            }
+            <line class="hist-axis" x1="0" y1="30" x2="@(n * 10)" y2="30" />
+        </svg>
+        <span class="visually-hidden">@RanksText(histogram)</span>
+    };
+
+    /// <summary>Hover text of the whole histogram: the used positions, and that the others are empty.</summary>
+    private static string RanksTitle(int[] histogram, int voters)
+    {
+        var used = histogram.Select((c, r) => (c, r)).Where(x => x.c > 0).Select(x => $"{PollText.Ordinal(x.r + 1)}: {PollText.VotersShare(x.c, voters)}").ToList();
+        if (used.Count == 0) return "Not ranked";
+        return string.Join(" · ", used) + (used.Count < histogram.Length ? " · others 0" : "");
+    }
+
+    private static string RanksText(int[] histogram)
+    {
+        var used = histogram.Select((c, r) => (c, r)).Where(x => x.c > 0).Select(x => $"rank {x.r + 1}: {x.c}").ToList();
+        return used.Count == 0 ? "not ranked" : string.Join(", ", used);
+    }
+
+    private string Percent(int count) => (count * 100.0 / Results.VoterCount).ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "%";
+}

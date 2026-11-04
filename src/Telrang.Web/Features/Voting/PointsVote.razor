@@ -1,0 +1,65 @@
+@* Points ballot fields inside the static vote form (DESIGN.md §21.1): a number field per option. points.js shows the
+   steppers and slider (rendered hidden) and keeps the remaining budget current; it refuses steps past the budget.
+   BallotValidator on the server stays authoritative. *@
+
+<div class="points-vote" data-points data-budget="@budget" data-cap="@cap">
+    <div class="visually-hidden" aria-live="polite" aria-atomic="true" data-announce></div>
+    <ul class="list-unstyled points-list">
+        @foreach (var o in Question.Options)
+        {
+            var key = o.Key;
+            var value = Values.PointsOf(key);
+            <li class="card points-card" data-key="@key" data-label="@o.Label" @key="key">
+                <div class="card-body">
+                    <h2 class="h6 fw-semibold mb-1 text-break" id="lbl-@key">@o.Label</h2>
+                    @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
+                    {
+                        <div class="poll-markdown small text-secondary mb-2">@MarkdownRenderer.Render(o.DescriptionMarkdown)</div>
+                    }
+                    <div class="points-controls">
+                        <button type="button" class="btn btn-outline-secondary points-btn" data-step="-5" hidden aria-label="Remove 5 points from @o.Label">−5</button>
+                        <button type="button" class="btn btn-outline-secondary points-btn" data-step="-1" hidden aria-label="Remove 1 point from @o.Label">−1</button>
+                        <label class="visually-hidden" for="pts-@key">Points for @o.Label</label>
+                        <input id="pts-@key" name="@(Preview ? null : BallotForm.Field(key))" data-field="@BallotForm.Field(key)" class="form-control form-control-lg points-input" type="number" inputmode="numeric"
+                               min="0" max="@cap" step="1" value="@(Values.Points.GetValueOrDefault(key) ?? "0")" />
+                        <button type="button" class="btn btn-outline-primary points-btn" data-step="1" hidden aria-label="Add 1 point to @o.Label">+1</button>
+                        <button type="button" class="btn btn-outline-primary points-btn" data-step="5" hidden aria-label="Add 5 points to @o.Label">+5</button>
+                    </div>
+                    <label class="visually-hidden" for="rng-@key">Points for @o.Label (slider)</label>
+                    <input id="rng-@key" class="form-range points-range" type="range" min="0" max="@cap" step="1" value="@Math.Clamp(value, 0, cap)" hidden />
+                    <div class="small text-danger points-hint" data-hint></div>
+                </div>
+            </li>
+        }
+    </ul>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public BallotForm Values { get; set; } = default!;
+    /// <summary>The home page example (DESIGN.md §23.2): the same fields without names, so nothing can be posted.</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    private int budget, cap;
+
+    protected override void OnParametersSet()
+    {
+        budget = Question.Budget ?? 0;
+        cap = Math.Min(Question.MaxPerOption ?? budget, budget);
+    }
+
+    public static int Remaining(PollQuestion q, BallotForm values) => (q.Budget ?? 0) - q.Options.Sum(o => values.PointsOf(o.Key));
+
+    /// <summary>The submit bar's budget line (points.js keeps it current).</summary>
+    public static RenderFragment Tally(PollQuestion q, BallotForm values) => __builder =>
+    {
+        var remaining = Remaining(q, values);
+        <span class="points-remaining @(remaining < 0 ? "over-budget" : remaining == 0 ? "all-spent" : "")" aria-live="polite" aria-atomic="true" data-remaining>
+            Remaining: <strong data-remaining-value>@remaining</strong> of @(q.Budget ?? 0)
+            @if (q.SpendAll)
+            {
+                <span class="points-must" data-must hidden="@(remaining == 0)">(must spend all)</span>
+            }
+        </span>
+    };
+}

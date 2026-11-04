@@ -1,0 +1,24 @@
+﻿@page "/Error"
+@layout PublicLayout
+@using System.Diagnostics
+
+<PageTitle>Error</PageTitle>
+
+<PageHeader Title="Error" />
+<p>Reload the page or try again later.</p>
+
+@if (ShowRequestId)
+{
+    <p class="small text-secondary">Request ID <code>@RequestId</code></p>
+}
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

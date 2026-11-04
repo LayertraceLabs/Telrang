@@ -1,0 +1,181 @@
+@* Clock face for a time slot (DESIGN.md §27): the hour first (24 hours on two rings: 1–12 outside, 13–23 and 00 inside),
+   then the minutes in 5-minute steps; then the same for the end, or "Skip end" for a start time alone. An end not after
+   the start is refused. Every number is a button (Tab, Enter); Escape closes. The typed time field next to it stays the
+   plain way to enter a time. The ring positions are CSS classes (clock-pos-0 … 11), no inline style. *@
+
+<button type="button" class="btn btn-sm btn-outline-secondary btn-icon clock-toggle" aria-label="@($"Pick a time for {Label}")" title="Pick a time"
+        aria-expanded="@(open ? "true" : "false")" aria-controls="@panelId" @ref="toggle" @onclick="ToggleAsync"><Icon Name="clock" /></button>
+@if (open)
+{
+    <div class="clock-picker" id="@panelId" role="group" aria-label="@($"Time for {Label}")" tabindex="-1" @ref="panel" @onkeydown="KeyAsync">
+        <div class="clock-readout">
+            <button type="button" class="clock-part @(IsStart ? "active" : "")" aria-label="@($"Start {PartText(startHour, startMinute)}")"
+                    @onclick="() => Go(Stage.StartHour)">@PartText(startHour, startMinute)</button>
+            <span aria-hidden="true">–</span>
+            <button type="button" class="clock-part @(IsStart ? "" : "active")" aria-label="@($"End {PartText(endHour, null)}")" disabled="@(startMinute is null)"
+                    @onclick="() => Go(Stage.EndHour)">@PartText(endHour, null)</button>
+        </div>
+        <p class="clock-prompt" aria-live="polite">@Prompt</p>
+        <div class="clock-face @(IsHour ? "clock-face-hours" : "clock-face-minutes")">
+            @if (IsHour)
+            {
+                @for (var i = 0; i < 12; i++)
+                {
+                    var outer = i == 0 ? 12 : i;
+                    var inner = i == 0 ? 0 : i + 12;
+                    @Number(outer, "clock-outer", i)
+                    @Number(inner, "clock-inner", i)
+                }
+            }
+            else
+            {
+                @for (var i = 0; i < 12; i++)
+                {
+                    @Number(i * 5, "clock-outer", i)
+                }
+            }
+            <span class="clock-center" aria-hidden="true"></span>
+        </div>
+        @if (error is not null)
+        {
+            <div class="invalid-feedback d-block" role="alert">@error</div>
+        }
+        <div class="clock-actions">
+            @if (!IsStart)
+            {
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="SkipEndAsync">Skip end</button>
+            }
+            <button type="button" class="btn btn-sm btn-link" @onclick="CloseAsync">Cancel</button>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>What the time is for, e.g. "Thursday 5 November 2026" (accessible names).</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    /// <summary>A start, and an end after it or null.</summary>
+    [Parameter] public EventCallback<(TimeOnly Start, TimeOnly? End)> Picked { get; set; }
+
+    private enum Stage { StartHour, StartMinute, EndHour, EndMinute }
+
+    private static int counter;
+    private readonly string panelId = "clock" + Interlocked.Increment(ref counter).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private bool open, focusPanel, focusToggle;
+    private Stage stage;
+    private int? startHour, startMinute, endHour;
+    private string? error;
+    private ElementReference panel, toggle;
+
+    private bool IsStart => stage is Stage.StartHour or Stage.StartMinute;
+    private bool IsHour => stage is Stage.StartHour or Stage.EndHour;
+
+    private string Prompt => stage switch
+    {
+        Stage.StartHour => "Start: hour",
+        Stage.StartMinute => "Start: minutes",
+        Stage.EndHour => "End: hour",
+        _ => "End: minutes",
+    };
+
+    private static string Two(int n) => n.ToString("00", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string PartText(int? hour, int? minute) => (hour is { } h ? Two(h) : "--") + ":" + (minute is { } m ? Two(m) : "--");
+
+    private bool IsChosen(int value) => stage switch
+    {
+        Stage.StartHour => startHour == value,
+        Stage.StartMinute => startMinute == value,
+        Stage.EndHour => endHour == value,
+        _ => false,
+    };
+
+    private RenderFragment Number(int value, string ring, int position) => __builder =>
+    {
+        var chosen = IsChosen(value);
+        <button type="button" class="clock-num @ring clock-pos-@position @(chosen ? "chosen" : "")" aria-pressed="@(chosen ? "true" : "false")"
+                aria-label="@(IsHour ? $"{Two(value)} hours" : $"{Two(value)} minutes")" @onclick="() => PickAsync(value)">@Two(value)</button>
+    };
+
+    private void Go(Stage s)
+    {
+        if (s is Stage.EndHour && startMinute is null) return;
+        stage = s;
+        error = null;
+    }
+
+    private async Task ToggleAsync()
+    {
+        if (open) { await CloseAsync(); return; }
+        open = true;
+        stage = Stage.StartHour;
+        startHour = startMinute = endHour = null;
+        error = null;
+        focusPanel = true;
+    }
+
+    private async Task PickAsync(int value)
+    {
+        error = null;
+        switch (stage)
+        {
+            case Stage.StartHour:
+                startHour = value;
+                stage = Stage.StartMinute;
+                break;
+            case Stage.StartMinute:
+                startMinute = value;
+                stage = Stage.EndHour;
+                break;
+            case Stage.EndHour:
+                endHour = value;
+                stage = Stage.EndMinute;
+                break;
+            default:
+                var start = new TimeOnly(startHour!.Value, startMinute!.Value);
+                var end = new TimeOnly(endHour!.Value, value);
+                if (end <= start)
+                {
+                    error = $"Pick an end after {start:HH:mm}.";
+                    endHour = null;
+                    stage = Stage.EndHour;
+                    return;
+                }
+                await DoneAsync(start, end);
+                break;
+        }
+    }
+
+    private Task SkipEndAsync() =>
+        startHour is { } h && startMinute is { } m ? DoneAsync(new TimeOnly(h, m), null) : Task.CompletedTask;
+
+    private async Task DoneAsync(TimeOnly start, TimeOnly? end)
+    {
+        open = false;
+        focusToggle = true;
+        await Picked.InvokeAsync((start, end));
+    }
+
+    private Task CloseAsync()
+    {
+        open = false;
+        focusToggle = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task KeyAsync(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await CloseAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusPanel && !focusToggle) return;
+        var target = focusPanel && open ? panel : toggle;
+        focusPanel = focusToggle = false;
+        try { await target.FocusAsync(); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { } // the element is gone (the day was removed)
+    }
+}

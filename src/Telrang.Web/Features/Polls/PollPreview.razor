@@ -1,0 +1,87 @@
+@using Telrang.Web.Features.Voting
+@* Live preview beside the poll form (DESIGN.md §20.2): what voters will read. Built from the draft as it is, so it follows
+   every keystroke even while a field is invalid; when the draft is valid the validated definition (normalised labels,
+   date order) is shown instead. *@
+
+@{ var q = PreviewQuestion; }
+<div class="card editor-preview-card">
+    <div class="card-body">
+        <h3 class="h4 card-title text-break @(string.IsNullOrWhiteSpace(Draft.Title) ? "text-secondary" : "")">@(string.IsNullOrWhiteSpace(Draft.Title) ? "Untitled" : Draft.Title.Trim())</h3>
+        <p class="small text-secondary mb-2">@PollText.TypeName(q.Type) · @PollText.RulesLine(q)</p>
+        @if (!string.IsNullOrWhiteSpace(Draft.Description))
+        {
+            <div class="poll-markdown border-top pt-2 mb-2">@Markdown(Draft.Description, Limits.DescriptionMax)</div>
+        }
+        @if (q.Options.Count == 0)
+        {
+            <p class="text-secondary small mb-0">No options yet.</p>
+        }
+        else if (q.Type == PollType.Dates)
+        {
+            <DatesViews Options="q.Options">
+                <Cell>
+                    <span class="dates-cell dates-cell-static"><span class="dates-cell-label">@DatesFormat.SlotLabel(context.Option)</span></span>
+                </Cell>
+            </DatesViews>
+        }
+        else
+        {
+            <ol class="list-group list-group-numbered">
+                @foreach (var o in q.Options)
+                {
+                    <li class="list-group-item" @key="o.Key">
+                        <span class="fw-semibold text-break">@o.Label</span>
+                        @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
+                        {
+                            <div class="poll-markdown small mt-1">@Markdown(o.DescriptionMarkdown, Limits.OptionDescriptionMax)</div>
+                        }
+                    </li>
+                }
+            </ol>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PollDraft Draft { get; set; } = default!;
+
+    /// <summary>The validated definition when the draft is valid (null otherwise).</summary>
+    [Parameter] public PollDefinition? Definition { get; set; }
+
+    [Parameter] public string? DefaultTimeZone { get; set; }
+
+    /// <summary>The admin's limits: text over them is not rendered (pentest R2-POLLS-1).</summary>
+    [Parameter] public PollLimits Limits { get; set; } = PollLimits.Default;
+
+    private static RenderFragment Markdown(string text, int max) => builder =>
+    {
+        if (text.Trim().Length > max) builder.AddMarkupContent(0, "<p class=\"text-secondary\">Too long to preview.</p>");
+        else builder.AddContent(0, MarkdownRenderer.Render(text));
+    };
+
+    /// <summary>The definition's question, else a lenient one from the draft (blank options left out).</summary>
+    private PollQuestion PreviewQuestion
+    {
+        get
+        {
+            if (Definition is { Questions.Count: > 0 } d) return d.Questions[0];
+            var q = Draft.Questions.Count > 0 ? Draft.Questions[0] : new QuestionDraft();
+            var options = q.Type == PollType.Dates
+                ? q.Options.Where(o => o.Date is not null).OrderBy(o => o.Date).ThenBy(o => o.Start).ThenBy(o => o.End)
+                    .Select((o, i) => new PollOption($"o{i}", Telrang.Core.Polls.PollRules.DateLabel(o.Date!.Value, o.Start, o.End), o.Description ?? "")
+                    { Date = o.Date, Start = o.Start, End = o.End })
+                : q.Options.Where(o => !string.IsNullOrWhiteSpace(o.Label))
+                    .Select((o, i) => new PollOption($"o{i}", o.Label.Trim(), o.Description ?? ""));
+            return new PollQuestion(PollDefinition.QuestionKey(0), q.Type, options.ToList())
+            {
+                Scoring = q.Scoring,
+                MaxBans = Math.Max(0, q.Bans),
+                RankAll = q.RankAll,
+                Budget = q.Budget,
+                MaxPerOption = q.MaxPerOption,
+                SpendAll = q.SpendAll,
+                Maybe = q.Maybe,
+            };
+        }
+    }
+}

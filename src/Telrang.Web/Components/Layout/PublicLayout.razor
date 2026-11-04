@@ -1,0 +1,20 @@
+@inherits LayoutComponentBase
+
+@* Anonymous-facing pages (DESIGN.md §11): vote and results pages, setup, unsubscribe, about, sign-in
+   and error pages. No app navigation; a signed-in visitor reaches My polls / My votes through the account menu. *@
+<div class="shell shell-public">
+    <header class="app-header app-header-slim">
+        <div class="shell-container app-header-inner">
+            <AppBrand />
+            <ThemeSwitch />
+            <div class="app-header-end"><UserMenu AppLinks /></div>
+        </div>
+    </header>
+    <main class="app-main">
+        <article class="content shell-container">
+            @Body
+        </article>
+    </main>
+    <SiteFooter />
+</div>
+<ErrorUi />

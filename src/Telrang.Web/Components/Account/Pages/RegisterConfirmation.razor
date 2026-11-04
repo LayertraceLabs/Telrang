@@ -1,0 +1,23 @@
+@page "/Account/RegisterConfirmation"
+@inject SettingsService Settings
+@inject NavigationManager NavigationManager
+
+<PageTitle>Check your mail</PageTitle>
+
+@* The same page for a new account and for an address that already has one (pentest AV-10: no account oracle). *@
+<h1>Check your mail</h1>
+@if (Settings.Current.Mail.IsConfigured)
+{
+    <p role="status">A message about this address is on its way. Open its link, then <a href="@LoginUrl">log in</a>.</p>
+}
+else
+{
+    <p role="status">Ask an admin to verify that address, then <a href="@LoginUrl">log in</a>.</p>
+}
+
+@code {
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string LoginUrl => NavigationManager.GetUriWithQueryParameters("Account/Login", new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl });
+}

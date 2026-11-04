@@ -1,0 +1,92 @@
+@page "/Account/Manage/ResetAuthenticator"
+
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+@inject AccountService Accounts
+@inject ILogger<ResetAuthenticator> Logger
+
+<PageTitle>Reset authenticator key</PageTitle>
+
+<StatusMessage Message="@message" />
+<h2 class="h4">Reset authenticator key</h2>
+<p>2FA stays off until you add the new key to your app.</p>
+<form @formname="reset-authenticator" @onsubmit="OnSubmitAsync" method="post" class="col-md-6 col-lg-4">
+    <AntiforgeryToken />
+    @if (twoFactorOn)
+    {
+        <div class="form-floating mb-3">
+            <input id="reset-code" name="Code" class="form-control" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required />
+            <label for="reset-code">Authenticator code</label>
+        </div>
+    }
+    else
+    {
+        <div class="form-floating mb-3">
+            <input id="reset-secret" name="Code" type="password" class="form-control" autocomplete="current-password" placeholder="password" required />
+            <label for="reset-secret">Password</label>
+        </div>
+    }
+    <button class="btn btn-danger" type="submit">Reset key</button>
+</form>
+
+@code {
+    private ApplicationUser? user;
+    private bool twoFactorOn;
+    private string? message;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "reset-authenticator")]
+    private string? Code { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+        twoFactorOn = await UserManager.GetTwoFactorEnabledAsync(user);
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+        // Resetting turns 2FA off: with 2FA on it needs a current code, else the password
+        // (pentest R2-ACC-5).
+        if (!(twoFactorOn ? await Accounts.VerifyTotpAsync(user, Code) : await Accounts.ReauthenticateAsync(user, Code)))
+        {
+            (SignInManager as AppSignInManager)?.RecordFailure();
+            message = twoFactorOn ? "Error: Code is wrong. Enter the current code from your app." : "Error: Password is wrong.";
+            return;
+        }
+
+        await UserManager.SetTwoFactorEnabledAsync(user, false);
+        await UserManager.ResetAuthenticatorKeyAsync(user);
+        // Admins must keep 2FA: the session is gated to enrolment until the new key is confirmed.
+        if (await UserManager.IsInRoleAsync(user, AppRoles.Admin))
+        {
+            user.MustEnrolTwoFactor = true;
+            await UserManager.UpdateAsync(user);
+        }
+        Logger.LogInformation("User with ID '{UserId}' has reset their authentication app key.", user.Id);
+        await Accounts.NotifySecurityChangeAsync(user, "The authenticator key was reset");
+
+        await SignInManager.RefreshSignInAsync(user);
+
+        RedirectManager.RedirectToWithStatus(
+            "Account/Manage/EnableAuthenticator",
+            "Key reset. Add the new key to your app.",
+            HttpContext);
+    }
+}

@@ -1,0 +1,183 @@
+@inherits AdminTabBase
+
+<h2 class="visually-hidden">Abuse</h2>
+<AdminStatus Message="@StatusMessage" Ok="@StatusOk" />
+
+<div class="d-flex flex-wrap align-items-center gap-1 mb-2">
+    <h3 class="h5 mb-0">Blocks</h3>
+    <OptionHelp Id="account-block" Label="Blocks">
+        <p><em>Block</em> stops one account for 1 to 43 200 minutes (30 days): every request made with its sign-in gets the
+            "Too many requests" page until then. The note (200 characters) is for other admins. Admin accounts are never
+            blocked, and you cannot block yourself. For a lasting stop use <em>Lock</em> on the Users tab; for a network use
+            Blocked ranges below.</p>
+        <p>The list also shows automatic blocks. Signals from one address (IPv4 /32, IPv6 /48) or account are weighted:
+            honeypot field 10, form timing and captcha failures 2, failed sign-ins, 429 responses and refused limits 1.
+            20 within 10 minutes block for 1 minute, then 10, then 60; 24 hours without signals start over. Failed sign-ins
+            count only for the address, so nobody can block someone else's account by guessing its password.</p>
+        <p><em>Clear</em> lifts a block at once and drops its signals; the next block of that key is still the longer one.
+            Blocks and signals live in memory only: a restart clears them, and addresses are never written to the database
+            or a log. Blocks and clears are logged; a cleared address block by its kind only.</p>
+    </OptionHelp>
+</div>
+
+<form class="row g-2 align-items-end mb-3" @onsubmit="AddAsync">
+    <div class="col-12 col-md-5">
+        <label for="block-target" class="form-label small mb-0" data-help="account-block">Account email</label>
+        <input id="block-target" type="email" class="form-control" placeholder="name@example.com" autocomplete="off" @bind="target" />
+    </div>
+    <div class="col-5 col-md-2">
+        <label for="block-minutes" class="form-label small mb-0" data-help="account-block">Minutes</label>
+        <input id="block-minutes" type="number" min="1" class="form-control" @bind="minutes" />
+    </div>
+    <div class="col-7 col-md-3">
+        <label for="block-note" class="form-label small mb-0" data-help="account-block">Note</label>
+        <input id="block-note" class="form-control" maxlength="200" @bind="note" />
+    </div>
+    <div class="col-12 col-md-2">
+        <button type="submit" class="btn btn-outline-danger w-100" disabled="@(Busy || string.IsNullOrWhiteSpace(target))">Block</button>
+    </div>
+</form>
+
+@if (blocks is null)
+{
+    <p>Loading…</p>
+}
+else if (blocks.Count == 0)
+{
+    <EmptyState Text="No blocks." />
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm admin-table">
+            <thead><tr><th>Key</th><th>Reason</th><th>Until</th><th class="text-end">Signals</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var b in blocks)
+                {
+                    <tr @key="b.Id">
+                        <td class="text-break">
+                            <span class="badge text-bg-light border me-1">@KindName(b.Kind)</span>
+                            <span class="font-monospace small">@(b.Label ?? b.Key)</span>
+                            @if (b.Note is not null)
+                            {
+                                <div class="small text-secondary">@b.Note</div>
+                            }
+                        </td>
+                        <td>@b.Reason</td>
+                        <td class="text-nowrap">@PollText.DateTime(b.Until)</td>
+                        <td class="text-end">@(b.Manual ? "–" : b.Count.ToString())</td>
+                        <td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.ClearBlockAsync(c, b.Id))">Clear</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+<div class="d-flex flex-wrap align-items-center gap-1 mt-4 mb-2">
+    <h3 class="h5 mb-0">Blocked ranges</h3>
+    <OptionHelp Id="blocked-ranges" Label="Blocked ranges">
+        <p>Blocks a network, or a single address, for everyone who is not signed in as an admin: they get the page "Access
+            from your network is blocked." (403). Stored in the database, so it survives restarts; this is the one place
+            addresses are stored, as typed here, and the admin log names the range.</p>
+        <p><em>Days</em>: 1 to 3650, or empty for no expiry; an expired range stops blocking at once. Refused: a range with
+            host bits set (enter the network address), a prefix shorter than /16 for IPv4 or /32 for IPv6, and ranges that
+            contain loopback, a trusted reverse proxy or your own current address. At most 1000 ranges. <em>Remove</em>
+            lifts one at once.</p>
+        <p>Locked out anyway: start the server once with <code>Abuse__ClearBlockedRangesOnStart=true</code>, which deletes
+            every range.</p>
+    </OptionHelp>
+</div>
+<form class="row g-2 align-items-end mb-3" @onsubmit="AddRangeAsync">
+    <div class="col-12 col-md-4">
+        <label for="range-cidr" class="form-label small mb-0" data-help="blocked-ranges">CIDR</label>
+        <input id="range-cidr" class="form-control" placeholder="203.0.113.0/24" autocomplete="off" @bind="rangeCidr" />
+    </div>
+    <div class="col-5 col-md-2">
+        <label for="range-days" class="form-label small mb-0" data-help="blocked-ranges">Days</label>
+        <input id="range-days" type="number" min="1" max="3650" class="form-control" placeholder="no expiry" @bind="rangeDays" />
+    </div>
+    <div class="col-7 col-md-4">
+        <label for="range-note" class="form-label small mb-0" data-help="blocked-ranges">Note</label>
+        <input id="range-note" class="form-control" maxlength="@BlockedRange.MaxNoteLength" @bind="rangeNote" />
+    </div>
+    <div class="col-12 col-md-2">
+        <button type="submit" class="btn btn-outline-danger w-100" disabled="@(Busy || string.IsNullOrWhiteSpace(rangeCidr))">Add</button>
+    </div>
+</form>
+
+@if (ranges is null)
+{
+    <p>Loading…</p>
+}
+else if (ranges.Count == 0)
+{
+    <EmptyState Text="No blocked ranges." />
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm admin-table">
+            <thead><tr><th>Range</th><th>Expires</th><th>Created by</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var r in ranges)
+                {
+                    <tr @key="r.Id">
+                        <td class="text-break">
+                            <span class="font-monospace small">@r.Cidr</span>
+                            @if (r.Note is not null)
+                            {
+                                <div class="small text-secondary">@r.Note</div>
+                            }
+                        </td>
+                        <td class="text-nowrap">@(r.ExpiresAt is { } x ? PollText.DateTime(x) : "never")</td>
+                        <td class="text-break small">@(r.CreatedBy ?? "–")<div class="text-secondary">@PollText.DateTime(r.CreatedAt)</div></td>
+                        <td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.RemoveRangeAsync(c, r.Id))">Remove</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<AbuseBlock>? blocks;
+    private string? target;
+    private int minutes = 60;
+    private string? note;
+    private IReadOnlyList<BlockedRangeRow>? ranges;
+    private string? rangeCidr;
+    private int? rangeDays;
+    private string? rangeNote;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override Task OnActionDoneAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        blocks = await WithAdminAsync((a, c) => a.ListBlocksAsync(c));
+        ranges = await WithAdminAsync((a, c) => a.ListRangesAsync(c));
+    }
+
+    private async Task AddRangeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(rangeCidr)) return;
+        var (cidr, days, rangeNoteValue) = (rangeCidr, rangeDays, rangeNote);
+        await RunAsync((a, c) => a.AddRangeAsync(c, cidr, rangeNoteValue, days));
+        if (StatusOk) (rangeCidr, rangeDays, rangeNote) = (null, null, null);
+    }
+
+    private async Task AddAsync()
+    {
+        if (string.IsNullOrWhiteSpace(target)) return;
+        var t = target;
+        await RunAsync((a, c) => a.AddBlockAsync(c, t, minutes, note));
+        if (StatusOk) (target, note) = (null, null);
+    }
+
+    private static string KindName(AbuseKind kind) => kind switch
+    {
+        AbuseKind.Account => "account",
+        _ => "address",
+    };
+}

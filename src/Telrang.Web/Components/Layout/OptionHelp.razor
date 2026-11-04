@@ -1,0 +1,47 @@
+@* Hidden description of an option (DESIGN.md §22.2, §23.4): an icon button next to the label and a panel that shows
+   under the control. Inside an .option-field container the panel is moved after the control by CSS (order); elsewhere it
+   follows the button. HelpState (cascaded by AdminPage and PollEditor) opens or closes every panel at once; a single toggle
+   afterwards changes only itself. Plain markup written in the component, no Markdown, no user content.
+   On a static page (no render mode, e.g. Account → Profile) the button carries data-static-help and js/menus.js
+   toggles the panel instead. *@
+<button type="button" class="option-help-toggle" aria-expanded="@(open ? "true" : "false")" aria-controls="@PanelId"
+        aria-label="@($"About {Label}")" title="@($"About {Label}")" data-static-help="@IsStatic" @onclick="Toggle"><Icon Name="info" /></button>
+<div class="option-help-panel" id="@PanelId" hidden="@(!open)">@ChildContent</div>
+
+@code {
+    private static int counter;
+
+    /// <summary>The option's visible label; the button's accessible name is "About {Label}".</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    /// <summary>
+    /// Optional stable key: the panel id is <c>help-{Id}</c>. Labels covered by a shared description name it with
+    /// <c>data-help="{Id}"</c> (checked by <c>AdminHelpTests</c>).
+    /// </summary>
+    [Parameter] public string? Id { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [CascadingParameter] public HelpState? State { get; set; }
+
+    private readonly string autoId = "help-" + Interlocked.Increment(ref counter).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private bool open;
+    private int seenGeneration = -1;
+
+    /// <summary>Rendered without a circuit for good (not a prerender of an interactive page): JS toggles the panel.</summary>
+    private bool IsStatic => !RendererInfo.IsInteractive && AssignedRenderMode is null;
+
+    private string PanelId => Id is { Length: > 0 } id ? "help-" + id : autoId;
+
+    protected override void OnParametersSet()
+    {
+        // Follow the fold-all setting whenever it was set since this toggle last looked (also on first render).
+        if (State is { } s && s.Generation != seenGeneration)
+        {
+            open = s.AllOpen;
+            seenGeneration = s.Generation;
+        }
+    }
+
+    private void Toggle() => open = !open;
+}

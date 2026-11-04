@@ -1,0 +1,93 @@
+@page "/Account/Manage/Disable2fa"
+
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<Disable2fa> Logger
+@inject SignInManager<ApplicationUser> SignInManager
+@inject AccountService Accounts
+
+<PageTitle>Disable 2FA</PageTitle>
+
+<StatusMessage Message="@message" />
+<h2 class="h4">Disable two-factor authentication</h2>
+@if (isAdmin)
+{
+    <p>Admins must keep 2FA on.</p>
+}
+else
+{
+    <form @formname="disable-2fa" @onsubmit="OnSubmitAsync" method="post" class="col-md-6 col-lg-4">
+        <AntiforgeryToken />
+        <div class="form-floating mb-3">
+            <input id="disable-code" name="Code" class="form-control" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required />
+            <label for="disable-code">Authenticator code</label>
+        </div>
+        <button class="btn btn-danger" type="submit">Disable 2FA</button>
+    </form>
+}
+
+@code {
+    private ApplicationUser? user;
+    private bool isAdmin;
+    private string? message;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "disable-2fa")]
+    private string? Code { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+        isAdmin = await UserManager.IsInRoleAsync(user, AppRoles.Admin);
+
+        if (HttpMethods.IsGet(HttpContext.Request.Method) && !await UserManager.GetTwoFactorEnabledAsync(user))
+        {
+            RedirectManager.RedirectTo("Account/Manage/TwoFactorAuthentication");
+        }
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+        // Admins must keep 2FA; everyone else proves the app first.
+        if (isAdmin)
+        {
+            message = "Error: Admins must keep 2FA on.";
+            return;
+        }
+        if (!await Accounts.VerifyTotpAsync(user, Code))
+        {
+            (SignInManager as AppSignInManager)?.RecordFailure();
+            message = "Error: Code is wrong. Enter the current code from your app.";
+            return;
+        }
+
+        var disable2faResult = await UserManager.SetTwoFactorEnabledAsync(user, false);
+        if (!disable2faResult.Succeeded)
+        {
+            throw new InvalidOperationException("Unexpected error occurred disabling 2FA.");
+        }
+
+        await SignInManager.RefreshSignInAsync(user); // the change bumped the security stamp
+        Logger.LogInformation("User with ID '{UserId}' has disabled 2fa.", user.Id);
+        await Accounts.NotifySecurityChangeAsync(user, "Two-factor authentication was turned off");
+        RedirectManager.RedirectToWithStatus(
+            "Account/Manage/TwoFactorAuthentication",
+            "2FA disabled.",
+            HttpContext);
+    }
+}

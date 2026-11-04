@@ -1,0 +1,359 @@
+@inherits AdminTabBase
+@implements IDisposable
+@inject SettingsService Settings
+
+<h2 class="visually-hidden">Users</h2>
+
+<div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <button type="button" class="btn btn-primary" disabled="@Busy" @onclick="CreateAsync">Create account</button>
+    <OptionHelp Label="Create account">
+        <p>Creates a pending account without an email and shows its setup link: 7 days, single use, shown once, for you to
+            hand over. Whoever opens it enters an email and a password and must set up an authenticator app (TOTP) before
+            using the account.</p>
+        <p>The email stays unverified, so the account cannot create polls, until it is confirmed: by the mailed link when mail
+            is configured, by <em>Mark verified</em>, or automatically with <em>Auto-verify created accounts</em> (Settings,
+            mail off). Pending accounts are listed first with the link's expiry; <em>New setup link</em> replaces a lost or
+            expired one. Logged as <code>user.create</code>.</p>
+    </OptionHelp>
+    <form class="d-flex flex-wrap align-items-end gap-2" @onsubmit="InviteAsync">
+        <div class="option-field">
+            <label for="invite-email" class="form-label small mb-0">Invite by email</label>
+            <OptionHelp Label="Invite by email">
+                <p>Creates a pending account for this address and mails it a setup link (7 days, single use). Opening the link
+                    proves the address, so the account starts verified; the person sets a password and an authenticator app.
+                    The per-recipient mail limits apply. Needs mail configured. Logged with the address.</p>
+            </OptionHelp>
+            <input id="invite-email" type="email" class="form-control" placeholder="name@example.com" autocomplete="off" @bind="inviteEmail" disabled="@(!mailConfigured)" />
+        </div>
+        <button type="submit" class="btn btn-outline-primary" disabled="@(Busy || !mailConfigured || string.IsNullOrWhiteSpace(inviteEmail))">Invite</button>
+    </form>
+    @if (!mailConfigured)
+    {
+        <span class="small text-secondary">Invites need <a href="admin?tab=mail">mail settings</a>.</span>
+    }
+</div>
+
+<AdminStatus Message="@StatusMessage" Ok="@StatusOk" Link="@StatusLink" />
+
+<div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+    <div class="option-field">
+        <label for="user-search" class="form-label small mb-0">Search</label>
+        <OptionHelp Label="Search">
+            <p>Matches any part of the display name, or a complete email address, ignoring case. Addresses are stored
+                encrypted, so part of an address finds nothing. At most @AdminService.MaxUserRows accounts are listed; refine
+                the search to find others. Deleted accounts are not listed.</p>
+        </OptionHelp>
+        <input id="user-search" type="search" class="form-control" placeholder="Name or full email" autocomplete="off" maxlength="256"
+               value="@query" @oninput="OnSearchInput" />
+    </div>
+    @if (list is { } shown)
+    {
+        <span class="small text-secondary user-count" role="status">@MatchText(shown)</span>
+    }
+</div>
+
+<div class="d-flex flex-wrap align-items-center gap-1 small text-secondary mb-1">
+    <span>Actions</span>
+    <OptionHelp Id="user-actions" Label="Account actions">
+        <ul>
+            <li><em>New setup link</em> (pending accounts): a new 7-day link, shown once; the previous one stops working. For
+                an invited account it is mailed again when mail is configured.</li>
+            <li><em>Lock</em>: blocks sign-in until unlocked and ends the account's sessions; its polls stay open and keep
+                taking votes. Not for yourself or the last admin. <em>Unlock</em> also ends a lockout after failed sign-ins
+                (5 failures lock the account for 15 minutes) and resets the failure count.</li>
+            <li><em>Make admin…</em>: full rights on this page, over every account and poll. Only for accounts with a
+                verified email and finished setup; the reason shows instead of the button otherwise. An account without 2FA
+                must set it up before it can use the role. <em>Remove admin…</em>: not for yourself or the last admin who
+                can act. Both take a tick box and are logged.</li>
+            <li><em>Mark verified</em>: confirms the email without a mail. The account can then create polls, receive reset
+                links and results-ready mail, and, if it registered itself, sign in. Nobody checks the address: confirm it
+                with the person first.</li>
+            <li><em>Reset password</em>: a single-use link valid 24 hours, shown here once and also mailed to the account when
+                mail is configured; it replaces earlier reset links. Using it sets a new password and removes the account's
+                passkeys.</li>
+            <li><em>Disable 2FA</em>: turns off the authenticator, deletes recovery codes and passkeys, ends the account's
+                sessions and requires a new enrolment at the next sign-in. A verified address is mailed a notice when mail is configured. For a lost
+                phone: whoever has the password sets up the new authenticator.</li>
+            <li><em>Delete…</em>: deletes the account's polls with their ballots and invite links, and removes its email,
+                password, 2FA, passkeys and display name; the row stays so references remain valid. Its ballots in other
+                people's polls stay under the names typed then. The address can register again. Not for yourself (use your
+                account page) or the last admin. No undo except a backup.</li>
+        </ul>
+    </OptionHelp>
+    <span>· Limits</span>
+    <OptionHelp Id="user-limits" Label="Per-account limits">
+        <p>The <em>Limits</em> disclosure of an account overrides the global per-user limits (Settings) for it. Empty: the
+            global value, shown as the placeholder. 0: no limit. Ballots per poll, invite links, poll duration and responses
+            per voter apply to the polls the account owns. An override also lifts the halving for new self-registered
+            accounts. Poll duration stays capped at 3650 days, and a new value moves no existing close date.
+            <em>Save limits</em> stores all six and is logged.</p>
+    </OptionHelp>
+</div>
+
+@if (list is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <ul class="list-group">
+        @foreach (var u in list.Rows)
+        {
+            <li class="list-group-item" @key="u.Id">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                    <div class="text-break">
+                        <div class="fw-semibold">
+                            @if (u.PendingSetup)
+                            {
+                                <span class="badge text-bg-warning me-1">Pending setup</span>
+                            }
+                            @(u.Email ?? "")
+                            @if (!string.IsNullOrEmpty(u.DisplayName))
+                            {
+                                <span class="fw-normal text-secondary"> · @u.DisplayName</span>
+                            }
+                        </div>
+                        @if (u.PendingSetup)
+                        {
+                            <div class="small text-secondary">
+                                @if (u.PendingLinkExpiresAt is { } exp && exp > DateTimeOffset.UtcNow)
+                                {
+                                    <span>Setup link expires @PollText.DateTime(exp)@(u.PendingLinkBy is { } by ? " · issued by " + by : "")</span>
+                                }
+                                else
+                                {
+                                    <span class="text-danger">Setup link expired</span>
+                                }
+                            </div>
+                        }
+                        <div class="small text-secondary">
+                            @if (u.IsAdmin)
+                            {
+                                <span class="badge text-bg-primary me-1">Admin</span>
+                            }
+                            @if (u.IsLockedOut)
+                            {
+                                <span class="badge text-bg-danger me-1">Locked</span>
+                            }
+                            @if (u.Email is not null)
+                            {
+                                <span class="badge @(u.EmailConfirmed ? "text-bg-success" : "text-bg-secondary") me-1">@(u.EmailConfirmed ? "Verified" : "Unverified")</span>
+                            }
+                            @if (!u.PendingSetup)
+                            {
+                                <span class="badge @(u.TwoFactorEnabled ? "text-bg-success" : "text-bg-secondary") me-1">2FA @(u.TwoFactorEnabled ? "on" : u.MustEnrolTwoFactor ? "required" : "off")</span>
+                            }
+                            <span>created @(u.CreatedAt.Year > 1 ? PollText.Date(u.CreatedAt) : "–") · last login @(u.LastLoginAt is { } l ? PollText.Date(l) : "never") · @u.PollCount @(u.PollCount == 1 ? "poll" : "polls")</span>
+                            @if (u.AccessFailedCount > 0)
+                            {
+                                <span> · @u.AccessFailedCount failed</span>
+                            }
+                        </div>
+                        <div class="small text-secondary font-monospace">@u.Id</div>
+                        @if (!u.PendingSetup)
+                        {
+                            <details class="small mt-1 user-limits">
+                                <summary>Limits@(u.Limits.Any ? " (custom)" : "")</summary>
+                                <div class="row g-2 mt-1">
+                                    @foreach (var (field, label, key) in UserLimitOverrides.Fields)
+                                    {
+                                        var f = field;
+                                        <div class="col-6 col-lg-4">
+                                            <label for="limit-@u.Id-@f" class="form-label small mb-0" data-help="user-limits">@label</label>
+                                            <input id="limit-@u.Id-@f" type="number" min="0" class="form-control form-control-sm" placeholder="@Settings.Current.Int(key, LimitSettings.Fields.First(x => x.Key == key).Default)"
+                                                   value="@LimitValue(u, f)" @onchange="e => SetLimit(u.Id, f, e.Value?.ToString())" />
+                                        </div>
+                                    }
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-primary mt-2" disabled="@Busy" @onclick="() => SaveLimitsAsync(u)">Save limits</button>
+                            </details>
+                        }
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        @if (u.PendingSetup)
+                        {
+                            <button class="btn btn-sm btn-outline-primary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.RenewSetupLinkAsync(c, u.Id, Nav.BaseUri))">New setup link</button>
+                        }
+                        else
+                        {
+                            @if (u.IsLockedOut)
+                            {
+                                <button class="btn btn-sm btn-outline-success" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.UnlockAsync(c, u.Id))">Unlock</button>
+                            }
+                            else if (u.Id != currentUserId)
+                            {
+                                <button class="btn btn-sm btn-outline-danger" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.LockAsync(c, u.Id))">Lock</button>
+                            }
+                            @if (!u.IsAdmin && u.AdminBlocker is { } blocker)
+                            {
+                                <span class="small text-secondary align-self-center admin-blocker">@blocker</span>
+                            }
+                            else if (!u.IsAdmin && !IsAsking(u.Id, Confirm.Grant))
+                            {
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => Ask(u.Id, Confirm.Grant)">Make admin…</button>
+                            }
+                            else if (u.IsAdmin && u.Id != currentUserId && !IsAsking(u.Id, Confirm.Revoke))
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => Ask(u.Id, Confirm.Revoke)">Remove admin…</button>
+                            }
+                            @if (u.Email is not null && !u.EmailConfirmed)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.MarkEmailVerifiedAsync(c, u.Id))">Mark verified</button>
+                            }
+                            <button class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.ResetPasswordAsync(c, u.Id, Nav.BaseUri))">Reset password</button>
+                            @if (u.TwoFactorEnabled)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.DisableTwoFactorAsync(c, u.Id))">Disable 2FA</button>
+                            }
+                        }
+                        @if (u.Id != currentUserId && !IsAsking(u.Id, Confirm.Delete))
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Ask(u.Id, Confirm.Delete)">Delete…</button>
+                        }
+                    </div>
+                </div>
+                @if (IsAsking(u.Id, Confirm.Delete))
+                {
+                    <AdminConfirm Id="@("confirm-user-" + u.Id)" Busy="@Busy" Action="Delete user"
+                                  Text="@($"Delete {u.Email ?? "this pending account"} with {u.PollCount} {(u.PollCount == 1 ? "poll" : "polls")} and their ballots.")"
+                                  OnConfirm="() => RunAsync((a, c) => a.DeleteUserAsync(c, u.Id))" OnCancel="() => Ask(null, default)" />
+                }
+                else if (IsAsking(u.Id, Confirm.Grant))
+                {
+                    <AdminConfirm Id="@("confirm-grant-" + u.Id)" Busy="@Busy" Action="Make admin"
+                                  Text="@($"Grant admin rights to {u.Email}")"
+                                  OnConfirm="() => RunAsync((a, c) => a.SetAdminAsync(c, u.Id, true))" OnCancel="() => Ask(null, default)" />
+                }
+                else if (IsAsking(u.Id, Confirm.Revoke))
+                {
+                    <AdminConfirm Id="@("confirm-revoke-" + u.Id)" Busy="@Busy" Action="Remove admin"
+                                  Text="@($"Remove admin rights from {u.Email ?? "this account"}")"
+                                  OnConfirm="() => RunAsync((a, c) => a.SetAdminAsync(c, u.Id, false))" OnCancel="() => Ask(null, default)" />
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private enum Confirm { Delete, Grant, Revoke }
+
+    private AdminUserList? list;
+    private string? currentUserId;
+    private string? confirming;
+    private Confirm confirmKind;
+    private string? query;
+    private CancellationTokenSource? searchCts;
+    private string? inviteEmail;
+    private bool mailConfigured;
+
+    protected override async Task OnInitializedAsync()
+    {
+        currentUserId = (await CallerAsync()).FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        mailConfigured = Settings.Current.Mail.IsConfigured;
+        await LoadAsync();
+    }
+
+    protected override Task OnActionDoneAsync()
+    {
+        confirming = null;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        list = await WithAdminAsync((a, c) => a.SearchUsersAsync(c, query));
+        limitEdits.Clear();
+    }
+
+    /// <summary>Debounced server-side search: the last keystroke wins after 300 ms.</summary>
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        query = e.Value?.ToString();
+        searchCts?.Cancel();
+        var cts = searchCts = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(300, cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        var found = await WithAdminAsync((a, c) => a.SearchUsersAsync(c, query));
+        if (cts.IsCancellationRequested) return;
+        list = found;
+        confirming = null;
+        limitEdits.Clear();
+    }
+
+    private string MatchText(AdminUserList l)
+    {
+        var count = string.IsNullOrWhiteSpace(query)
+            ? $"{l.Total} {(l.Total == 1 ? "user" : "users")}"
+            : $"{l.Total} {(l.Total == 1 ? "match" : "matches")}";
+        return l.Truncated ? $"{count}, first {l.Rows.Count} shown. Refine your search." : count;
+    }
+
+    private bool IsAsking(string id, Confirm kind) => confirming == id && confirmKind == kind;
+
+    // Edited limit fields per user (field -> text); empty = global default.
+    private readonly Dictionary<string, Dictionary<string, string?>> limitEdits = new();
+
+    private string? LimitValue(AdminUserRow u, string field) =>
+        limitEdits.TryGetValue(u.Id, out var edits) && edits.TryGetValue(field, out var v) ? v : u.Limits.Get(field)?.ToString();
+
+    private void SetLimit(string userId, string field, string? value)
+    {
+        if (!limitEdits.TryGetValue(userId, out var edits)) limitEdits[userId] = edits = new();
+        edits[field] = value;
+    }
+
+    private async Task SaveLimitsAsync(AdminUserRow u)
+    {
+        int? Parse(string field, out bool bad)
+        {
+            var text = LimitValue(u, field);
+            bad = false;
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            if (int.TryParse(text, out var n) && n >= 0) return n;
+            bad = true;
+            return null;
+        }
+        var values = new Dictionary<string, int?>();
+        foreach (var (field, label, _) in UserLimitOverrides.Fields)
+        {
+            values[field] = Parse(field, out var bad);
+            if (bad)
+            {
+                (StatusMessage, StatusOk) = ($"{label}: enter a whole number.", false);
+                return;
+            }
+        }
+        var limits = new UserLimitOverrides(values["ActivePolls"], values["PollsPerDay"], values["BallotsPerPoll"], values["InvitesPerPoll"],
+            values["PollDurationDays"], values["ResponsesPerVoter"]);
+        await RunAsync((a, c) => a.SetUserLimitsAsync(c, u.Id, limits));
+    }
+
+    private void Ask(string? id, Confirm kind)
+    {
+        confirming = id;
+        confirmKind = kind;
+    }
+
+    private Task CreateAsync() => RunAsync((a, c) => a.CreateAccountAsync(c, Nav.BaseUri));
+
+    private async Task InviteAsync()
+    {
+        var email = inviteEmail?.Trim();
+        if (string.IsNullOrEmpty(email)) return;
+        await RunAsync((a, c) => a.InviteAsync(c, email));
+        if (StatusOk) inviteEmail = null;
+    }
+
+    public void Dispose()
+    {
+        searchCts?.Cancel();
+        searchCts?.Dispose();
+    }
+}

@@ -1,0 +1,27 @@
+@inherits ShellBase
+
+<div class="shell shell-sidebar">
+    @* CSS-only drawer for phone widths: the labels toggle this checkbox. No inline handlers (CSP). *@
+    <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Navigation menu" @bind="NavOpen" />
+    <header class="sidebar-topbar">
+        <label for="nav-toggle" class="icon-btn" aria-hidden="true"><Icon Name="menu" /></label>
+        <AppBrand />
+    </header>
+    <aside class="sidebar">
+        <div class="sidebar-brand"><AppBrand /></div>
+        <a class="btn btn-primary sidebar-new" href="polls/new"><Icon Name="plus" />New poll</a>
+        <AppNav Grouped CssClass="app-nav-vertical sidebar-nav" />
+        <ThemeSwitch Inline />
+        <div class="sidebar-user"><UserMenu Inline /></div>
+    </aside>
+    <label for="nav-toggle" class="sidebar-backdrop" aria-hidden="true"></label>
+    <div class="sidebar-main">
+        <main class="app-main">
+            <article class="content shell-container">
+                @Body
+            </article>
+        </main>
+        <SiteFooter />
+    </div>
+</div>
+<ErrorUi />

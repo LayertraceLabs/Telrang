@@ -1,0 +1,124 @@
+@page "/Account/ConfirmEmail"
+@* Reachable while the account gate is up (AccountGate). A GET only shows what is being confirmed (mail scanners and
+   link previews prefetch links); the POST (antiforgery) confirms, and only with the account's password unless this
+   browser is signed in as that account (pentest R2-ACC-1): a squatter's registration of someone else's address is
+   never verified by its owner clicking the link, since the owner does not know the squatter's password. *@
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+
+@using System.Text
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using Telrang.Web.Data
+@using Telrang.Web.Features.Polls
+
+@inject UserManager<ApplicationUser> UserManager
+@inject EmailProtection Emails
+@inject SignInManager<ApplicationUser> SignInManager
+
+<PageTitle>Confirm email</PageTitle>
+
+<h1>Confirm email</h1>
+<StatusMessage Message="@statusMessage" />
+@if (done)
+{
+    @* Signed out, Log in (no return URL) lands on My polls (DESIGN.md §23.3); signed in, straight there. *@
+    @if (signedInAsUser)
+    {
+        <p><a class="btn btn-primary" href="@IdentityRedirectManager.SignedInLanding">My polls</a></p>
+    }
+    else
+    {
+        <p><a href="Account/Login">Log in</a></p>
+    }
+}
+else if (user is not null)
+{
+    <form method="post" @formname="confirm-email" @onsubmit="ConfirmAsync" class="col-md-6 col-lg-4">
+        <AntiforgeryToken />
+        <p>Confirm <strong class="text-break">@Emails.Reveal(user.Email)</strong> for the account created on @PollTime.Format(user.CreatedAt, user.TimeZone).</p>
+        @if (!signedInAsUser)
+        {
+            <div class="form-floating mb-3">
+                <input type="password" id="confirm-password" name="Password" class="form-control" autocomplete="current-password" placeholder="password" required />
+                <label for="confirm-password">Password</label>
+            </div>
+        }
+        <button type="submit" class="btn btn-primary">Confirm email</button>
+    </form>
+}
+
+@code {
+    private ApplicationUser? user;
+    private string? token;
+    private bool signedInAsUser, done;
+    private string? statusMessage;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? UserId { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? Code { get; set; }
+
+    [SupplyParameterFromForm(FormName = "confirm-email")]
+    private string? Password { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var candidate = UserId is null ? null : await UserManager.FindByIdAsync(UserId);
+        try { token = Code is null ? null : Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(Code)); }
+        catch (FormatException) { }
+        // Checked, not used: the token is spent only by the POST.
+        if (candidate is { DeletedAt: null, Email: not null } && token is not null
+            && await UserManager.VerifyUserTokenAsync(candidate, UserManager.Options.Tokens.EmailConfirmationTokenProvider,
+                UserManager<ApplicationUser>.ConfirmEmailTokenPurpose, token))
+        {
+            user = candidate;
+        }
+        if (user is null)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            statusMessage = "Error: This link is invalid or expired.";
+            return;
+        }
+        signedInAsUser = UserManager.GetUserId(HttpContext.User) == user.Id;
+        if (user.EmailConfirmed)
+        {
+            done = true;
+            statusMessage = "Email confirmed.";
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (user is null || done) return;
+        if (!signedInAsUser)
+        {
+            // Wrong passwords count towards the account's lockout, as at sign-in.
+            if (await UserManager.IsLockedOutAsync(user))
+            {
+                statusMessage = "Error: Too many failed attempts. Try again later.";
+                return;
+            }
+            if (string.IsNullOrEmpty(Password) || Password.Length > 256 || !await UserManager.CheckPasswordAsync(user, Password))
+            {
+                await UserManager.AccessFailedAsync(user);
+                (SignInManager as AppSignInManager)?.RecordFailure();
+                statusMessage = "Error: Password is wrong.";
+                return;
+            }
+        }
+        var result = await UserManager.ConfirmEmailAsync(user, token!);
+        if (!result.Succeeded)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            statusMessage = "Error: This link is invalid or expired.";
+            user = null;
+            return;
+        }
+        done = true;
+        statusMessage = "Email confirmed.";
+    }
+}

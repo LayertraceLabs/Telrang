@@ -1,0 +1,46 @@
+@page "/notify/off/{Token}"
+@layout PublicLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@* Unsubscribe link from the results-ready mail (DESIGN.md §14.3a): no sign-in, idempotent. The token is a
+   Data Protection payload of the account and poll ids, so nobody can switch off someone else's mails. A GET only
+   shows the button (mail scanners and link previews prefetch links); the POST (antiforgery) switches the mails off. *@
+@inject PollSweepService Sweep
+@inject SettingsService Settings
+@inject NavigationManager Nav
+
+<PageTitle>Emails off - @Settings.AppName</PageTitle>
+
+@if (done)
+{
+    <h1>Emails off</h1>
+    <p>You will not be emailed about this poll.</p>
+}
+else if (valid)
+{
+    <h1>Poll emails</h1>
+    <form method="post" @formname="notify-off" @onsubmit="StopAsync">
+        <AntiforgeryToken />
+        <p>Stop the email when this poll closes.</p>
+        <button type="submit" class="btn btn-primary">Stop emails</button>
+    </form>
+}
+
+@code {
+    [Parameter] public string Token { get; set; } = "";
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+
+    private bool valid, done;
+
+    protected override void OnInitialized()
+    {
+        valid = Sweep.ReadUnsubscribeToken(Token) is not null;
+        if (!valid) Nav.NotFound();
+    }
+
+    private async Task StopAsync()
+    {
+        done = await Sweep.UnsubscribeAsync(Token, Http.RequestAborted);
+        if (!done) Nav.NotFound();
+    }
+}

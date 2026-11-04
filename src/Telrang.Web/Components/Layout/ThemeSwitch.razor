@@ -1,0 +1,42 @@
+@inject Telrang.Web.Features.Branding.ThemeService Theme
+
+@* Visitor light / dark / system switch (DESIGN.md §24.4). Stateless markup: the shown icon follows <html data-av-theme>
+   by CSS and js/theme-switch.js sets the cookie, the mode and aria-pressed, so the same markup works on static and
+   interactive pages. Hidden until that module runs (it sets <html data-av-switch>): without JS it could not act. A
+   <details> menu in the headers, a row of three buttons in the sidebar. "System" is "Default" when the admin's default
+   mode is fixed, since no choice then means that mode, not the OS setting. *@
+@if (Inline)
+{
+    <div class="theme-switch theme-switch-inline" role="group" aria-label="Theme">
+        @foreach (var (value, icon, label) in Choices)
+        {
+            <button type="button" class="theme-choice" data-theme-choice="@value" aria-pressed="false" title="@label"><Icon Name="@icon" /><span class="visually-hidden">@label</span></button>
+        }
+    </div>
+}
+else
+{
+    <details class="theme-switch" data-menu>
+        <summary class="icon-btn" aria-label="Theme" data-theme-toggle data-system-label="@SystemLabel">
+            <Icon Name="monitor" Class="theme-icon theme-icon-system" />
+            <Icon Name="sun" Class="theme-icon theme-icon-light" />
+            <Icon Name="moon" Class="theme-icon theme-icon-dark" />
+        </summary>
+        <div class="menu-panel menu-panel-end theme-menu" role="group" aria-label="Theme">
+            @foreach (var (value, icon, label) in Choices)
+            {
+                <button type="button" class="menu-item" data-theme-choice="@value" aria-pressed="false"><Icon Name="@icon" />@label<Icon Name="check" Class="theme-check" /></button>
+            }
+        </div>
+    </details>
+}
+
+@code {
+    /// <summary>A row of three buttons (the sidebar) instead of the menu.</summary>
+    [Parameter] public bool Inline { get; set; }
+
+    private string SystemLabel => Theme.Settings.BootstrapTheme is null ? "System" : "Default";
+
+    private IEnumerable<(string Value, string Icon, string Label)> Choices =>
+        [("system", "monitor", SystemLabel), ("light", "sun", "Light"), ("dark", "moon", "Dark")];
+}

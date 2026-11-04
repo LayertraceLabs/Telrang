@@ -1,0 +1,220 @@
+@page "/p/{Id}/results"
+@layout MainLayout
+@attribute [ExcludeFromInteractiveRouting]
+@* Static SSR: reads the voter cookies to decide CanSeeResults (after-vote mode). The owner's bar has the named forms
+   "close" / "reopen" (DESIGN.md §24.3), posted back here with antiforgery, checked through PollAccessService.CanEdit on
+   the request and answered with post/redirect/get. *@
+@inject IOptions<AppOptions> AppOptions
+@inject PollAccessService AccessService
+@inject PollService Polls
+@inject ResultsService ResultsService
+@inject PollCookies Cookies
+@inject UserManager<ApplicationUser> Users
+@inject NavigationManager Nav
+@inject TimeProvider Time
+
+@if (access is { } a)
+{
+    var d = a.Definition;
+    var live = a.CanEdit && results is not null;
+    <PageTitle>@(ballots is null ? "Results" : "Ballots"): @d.Title - @AppOptions.Value.Name</PageTitle>
+    @* DESIGN.md §21.2: on the owner's view js/results-live.js swaps this element's children for the same element of a
+       fresh fetch of this page whenever the stream says the poll changed. *@
+    <div data-live-results data-live-src="@(live ? $"p/{a.EncodedId}/results/live" : null)">
+    <h1 class="text-break">@d.Title</h1>
+    <p class="text-secondary">
+        Results ·
+        @if (a.IsClosed)
+        {
+            <span class="badge text-bg-secondary">Closed</span>
+        }
+        else
+        {
+            <span class="badge badge-open">Open</span>
+        }
+        @if (live)
+        {
+            <span class="badge badge-live" data-live-badge hidden><Icon Name="live" /> Live</span>
+        }
+        @if (!a.CanEdit)
+        {
+            <span>· <a href="p/@a.EncodedId" data-enhance-nav="false">Back to the poll</a></span>
+        }
+    </p>
+    @if (a.CanEdit)
+    {
+        <div class="owner-bar d-flex flex-wrap align-items-center gap-2 mb-3">
+            <span class="badge text-bg-info">Your poll</span>
+            <span class="small"><a href="polls/@a.EncodedId/edit">Edit</a> · <a href="polls/@a.EncodedId/share">Share</a>
+                · <a href="polls/new?from=@a.EncodedId">Copy</a> · <a href="p/@a.EncodedId" data-enhance-nav="false">Open poll</a></span>
+            @* The same rule as the share page: Reopen after a manual close, Close while open, nothing when the date closed it. *@
+            @if (ShowsReopen)
+            {
+                <form method="post" action="@FormAction" @formname="@ReopenForm" @onsubmit="ReopenAsync" class="ms-sm-auto">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-sm btn-outline-success">Reopen poll</button>
+                </form>
+            }
+            else if (ShowsClose)
+            {
+                <form method="post" action="@FormAction" @formname="@CloseForm" @onsubmit="CloseAsync" class="ms-sm-auto">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Close poll now</button>
+                </form>
+            }
+        </div>
+        @if (actionError is not null)
+        {
+            <div class="alert alert-danger py-2" role="alert">@actionError</div>
+        }
+    }
+
+    <ChangeLog Log="changes" ZoneId="@zone" ShowCounts="a.CanSeeResults" />
+    @if (!a.CanSeeResults)
+    {
+        <div class="alert alert-info" role="status">@PollText.ResultsHidden(d, a.HasBallot, a.IsClosed)</div>
+    }
+    else if (results is { } r)
+    {
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <p class="mb-0 me-auto"><strong>@r.VoterCount</strong> @(r.VoterCount == 1 ? "voter" : "voters").
+                <span class="small text-secondary">As of @PollTime.Format(computedAt, zone).</span></p>
+            @* A plain GET of this page (the same view and page): results are computed on every request. *@
+            <a class="btn btn-sm btn-outline-secondary" href="@RefreshHref" data-enhance-nav="false">Refresh</a>
+            @* DESIGN.md §33: the ballots view, for the owner and for voters with Show ballots. *@
+            @if (ballots is not null)
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="p/@a.EncodedId/results" data-enhance-nav="false">Summary</a>
+            }
+            else if (ResultsService.CanSeeBallotTable(a))
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="@BallotsHref" data-enhance-nav="false">Ballots</a>
+            }
+            @if (a.IsOwner)
+            {
+                <a class="btn btn-sm btn-outline-primary" href="polls/@a.EncodedId/results.csv" download data-enhance-nav="false">Results CSV</a>
+                <a class="btn btn-sm btn-outline-primary" href="polls/@a.EncodedId/export.csv" download data-enhance-nav="false">Ballots CSV</a>
+            }
+        </div>
+        @if (ballots is { } t)
+        {
+            @switch (d.Questions[0].Type)
+            {
+                case PollType.Ranked:
+                case PollType.Points:
+                    <BallotsView Definition="d" Table="t" BaseHref="@BallotsHref" />
+                    break;
+                case PollType.Dates:
+                    <DatesGridView Definition="d" Rows="t.Dates!" Window="t.Window" BaseHref="@BallotsHref" />
+                    break;
+                default:
+                    throw new InvalidOperationException($"No ballots view for poll type {d.Questions[0].Type}.");
+            }
+        }
+        else
+        {
+            @switch (d.Questions[0].Type)
+            {
+                case PollType.Ranked when r.Ranked is not null:
+                    <RankedResultsView Definition="d" Results="r.Ranked" />
+                    break;
+                case PollType.Points when r.Points is not null:
+                    <PointsResultsView Definition="d" Results="r.Points" Distribution="r.PointsDistribution" />
+                    break;
+                case PollType.Dates when r.Dates is not null:
+                    <DatesResultsView Definition="d" Results="r.Dates" />
+                    break;
+                default:
+                    throw new InvalidOperationException($"No results for poll type {d.Questions[0].Type}.");
+            }
+        }
+    }
+    </div>
+    @if (live)
+    {
+        <script type="module" src="@Assets["js/results-live.js"]"></script>
+    }
+}
+@if (isPost)
+{
+    @* Both named forms exist on every POST render (the state may have changed meanwhile, or the poster is not the
+       owner), so the framework never answers "no form named …"; the handlers do the checks. *@
+    @if (!ShowsClose)
+    {
+        <form method="post" action="@FormAction" @formname="@CloseForm" @onsubmit="CloseAsync" hidden></form>
+    }
+    @if (!ShowsReopen)
+    {
+        <form method="post" action="@FormAction" @formname="@ReopenForm" @onsubmit="ReopenAsync" hidden></form>
+    }
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+
+    /// <summary>The page of the ballot table (DESIGN.md §31), 1-based; anything else reads as the nearest page.</summary>
+    [SupplyParameterFromQuery(Name = ResultsQuery.Rows)] public int? RowsPage { get; set; }
+
+    /// <summary><c>ballots</c> for the ballots view (DESIGN.md §33); anything else, or a viewer it refuses, is the summary.</summary>
+    [SupplyParameterFromQuery(Name = ResultsQuery.View)] public string? View { get; set; }
+
+    public const string CloseForm = "close", ReopenForm = "reopen";
+
+    private PollAccess? access;
+    private bool isPost;
+    private string? actionError;
+    private bool ShowsReopen => access is { CanEdit: true, Poll.ClosedAt: not null };
+    private bool ShowsClose => access is { CanEdit: true, Poll.ClosedAt: null, IsClosed: false };
+    private string FormAction => $"p/{access?.EncodedId ?? Id}/results";
+    private PollResults? results;
+    private BallotTable? ballots;
+    private string BallotsHref => $"p/{access?.EncodedId ?? Id}/results?{ResultsQuery.View}={ResultsQuery.BallotsView}";
+    private string RefreshHref => ballots is null ? $"p/{access?.EncodedId ?? Id}/results"
+        : ballots.Window.Page == 1 ? BallotsHref : $"{BallotsHref}&{ResultsQuery.Rows}={ballots.Window.Page}";
+    private ChangeLogPage changes = ChangeLogPage.Empty;
+    private DateTimeOffset computedAt;
+    private string zone = PollTime.Utc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Telrang.Core.Ids.PollId.TryDecode(Id, out var pollId)) { Nav.NotFound(); return; }
+        var userId = Users.GetUserId(Http.User);
+        var visitor = Cookies.Read(Http, pollId, userId);
+        isPost = HttpMethods.IsPost(Http.Request.Method);
+        access = await AccessService.GetAsync(Id, visitor, Http.RequestAborted);
+        if (access is null) { Nav.NotFound(); return; }
+        var viewerZone = userId is null ? null : (await Users.GetUserAsync(Http.User))?.TimeZone;
+        zone = PollTime.ViewerZone(viewerZone, access.Definition.TimeZone);
+        changes = await Polls.ListChangesAsync(access, Http.RequestAborted);
+        if (!access.CanSeeResults) { Http.Response.StatusCode = StatusCodes.Status403Forbidden; return; }
+        var computed = await ResultsService.ComputeAsync(access, Http.RequestAborted);
+        if (string.Equals(View, ResultsQuery.BallotsView, StringComparison.Ordinal))
+            ballots = await ResultsService.BallotsAsync(access, RowsPage ?? 1, Http.RequestAborted);
+        results = computed;
+        computedAt = Time.GetUtcNow();
+    }
+
+    private Task CloseAsync() => SetClosedAsync(true);
+
+    private Task ReopenAsync() => SetClosedAsync(false);
+
+    /// <summary>The same service call as the share page; the owner check is the request's, through CanEdit.</summary>
+    private async Task SetClosedAsync(bool closed)
+    {
+        if (access is null) return;
+        if (!access.CanEdit || Users.GetUserId(Http.User) is not { } userId)
+        {
+            // Not the owner (or signed out since the form was rendered): nothing changes, as for a poll it cannot see.
+            Nav.NotFound();
+            return;
+        }
+        var (ok, error) = await Polls.ChangeClosedAsync(userId, access.EncodedId, closed, Http.RequestAborted);
+        if (ok)
+        {
+            Nav.NavigateTo(FormAction); // post/redirect/get
+            return;
+        }
+        actionError = error ?? "The poll could not be changed. Reload the page.";
+    }
+}

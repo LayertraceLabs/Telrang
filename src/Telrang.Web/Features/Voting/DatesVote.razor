@@ -1,0 +1,34 @@
+@using Telrang.Core.Ballots
+@* Dates ballot fields inside the static vote form (DESIGN.md §18.2, §21.1): a radio group per option in each of the
+   three views (DatesViews, DatesCell). Without JS the layout switch is a submit button that re-renders with the posted
+   answers; dates.js switches client-side, turns calendar and timeline cells into cycling buttons and keeps the tally
+   current. BallotValidator on the server stays authoritative (unknown options, maybe while maybe: no). *@
+
+<div class="dates-vote" data-dates-vote data-maybe="@(Question.Maybe ? "true" : "false")">
+    <div class="visually-hidden" aria-live="polite" aria-atomic="true" data-announce></div>
+    @if (!Preview)
+    {
+        <input type="hidden" name="@BallotForm.ShownViewField" value="@BallotForm.ViewValue(Values.View)" data-shown-view />
+    }
+    <DatesViews Options="Question.Options" FormView="Values.View" Preview="Preview">
+        <Cell>
+            <DatesCell Option="context.Option" View="context.View" Value="@Values.AnswerOf(context.Option.Key)"
+                       AllowMaybe="Question.Maybe" Active="@(context.View == Values.View)" Preview="Preview" />
+        </Cell>
+    </DatesViews>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public BallotForm Values { get; set; } = default!;
+    /// <summary>The home page example (DESIGN.md §23.2): no field names and a plain-button layout switch.</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    /// <summary>"3 yes · 1 maybe" for the submit bar (dates.js keeps it current).</summary>
+    public static string Tally(PollQuestion q, BallotForm values)
+    {
+        var yes = q.Options.Count(o => values.AnswerOf(o.Key) == Availability.Yes);
+        var maybe = q.Options.Count(o => values.AnswerOf(o.Key) == Availability.Maybe);
+        return q.Maybe ? $"{yes} yes · {maybe} maybe" : $"{yes} yes";
+    }
+}

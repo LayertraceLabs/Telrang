@@ -1,0 +1,78 @@
+@page "/Account/ConfirmEmailChange"
+@* The change was asked for from a signed-in session, so it is confirmed from one: signed out, the link leads to the
+   login and back; signed in as another account, it does nothing. A GET only shows the button (mail scanners and link
+   previews prefetch links); the POST (antiforgery) switches the email (pentest R2-ACC-1). *@
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject AccountService Accounts
+
+<PageTitle>Confirm email change</PageTitle>
+
+<h1>Confirm email change</h1>
+
+<StatusMessage Message="@message" />
+@if (user is not null && !done)
+{
+    <form method="post" @formname="confirm-email-change" @onsubmit="ConfirmAsync">
+        <AntiforgeryToken />
+        <p>New login email: <strong class="text-break">@Email</strong></p>
+        <button type="submit" class="btn btn-primary">Confirm email</button>
+    </form>
+}
+
+@code {
+    private ApplicationUser? user;
+    private bool done;
+    private string? message;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? UserId { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? Email { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? Code { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var me = await UserManager.GetUserAsync(HttpContext.User);
+        if (me is not { DeletedAt: null } || Email is null || Code is null || UserId is null)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            message = "Error: This link is invalid or expired.";
+            return;
+        }
+        if (me.Id != UserId)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+            message = "Error: Log in with the account that asked for this change.";
+            return;
+        }
+        user = me;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (user is null) return;
+        var result = await Accounts.ConfirmEmailChangeAsync(user, Email!, Code!);
+        if (!result.Succeeded)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            message = "Error: This link is invalid or expired.";
+            user = null;
+            return;
+        }
+        await SignInManager.RefreshSignInAsync(user); // the change bumped the security stamp
+        done = true;
+        message = $"Your login email is now {Email}.";
+    }
+}

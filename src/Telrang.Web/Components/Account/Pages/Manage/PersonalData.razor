@@ -1,0 +1,114 @@
+@page "/Account/Manage/PersonalData"
+
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using Telrang.Web.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject AccountService Accounts
+@inject ApplicationDbContext Db
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<PersonalData> Logger
+
+<PageTitle>Data and sessions</PageTitle>
+
+<StatusMessage Message="@message" />
+<h2 class="h4">Data and sessions</h2>
+
+<div class="d-flex flex-wrap align-items-end gap-2 mb-4">
+    <form action="Account/Manage/DownloadPersonalData" method="post" class="d-flex flex-wrap align-items-end gap-2">
+        <AntiforgeryToken />
+        <div>
+            <label for="download-secret" class="form-label small mb-0">Password or code</label>
+            <input id="download-secret" name="@AccountEndpoints.ReauthField" type="password" class="form-control" autocomplete="current-password" required />
+        </div>
+        <button class="btn btn-outline-primary" type="submit">Download my data</button>
+    </form>
+    <form action="Account/Manage/LogOutEverywhere" method="post">
+        <AntiforgeryToken />
+        <button class="btn btn-outline-secondary" type="submit">Log out everywhere</button>
+    </form>
+</div>
+
+<h3 class="h5">Delete account</h3>
+<form @formname="delete-account" @onsubmit="OnDeleteAsync" method="post" class="confirm-panel">
+    <AntiforgeryToken />
+    <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="confirm-delete" name="ConfirmDelete" value="true" />
+        <label class="form-check-label" for="confirm-delete">
+            Delete my account and my @pollCount @(pollCount == 1 ? "poll" : "polls") with all their ballots. This cannot be undone.
+        </label>
+    </div>
+    <div class="mb-2">
+        <label for="delete-secret" class="form-label small mb-0">Password or code</label>
+        <input id="delete-secret" name="@AccountEndpoints.ReauthField" type="password" class="form-control" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-danger" type="submit">Delete account</button>
+</form>
+
+@code {
+    private string? message;
+    private ApplicationUser? user;
+    private int pollCount;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "delete-account")]
+    private bool ConfirmDelete { get; set; }
+
+    [SupplyParameterFromForm(FormName = "delete-account", Name = AccountEndpoints.ReauthField)]
+    private string? Secret { get; set; }
+
+    [SupplyParameterFromQuery(Name = "reauth")]
+    private string? ReauthFailed { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+        pollCount = await Db.Polls.CountAsync(p => p.OwnerId == user.Id);
+        if (ReauthFailed is not null && HttpMethods.IsGet(HttpContext.Request.Method)) message = WrongSecret;
+    }
+
+    private const string WrongSecret = "Error: Password or code is wrong.";
+
+    private async Task OnDeleteAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+        if (!ConfirmDelete)
+        {
+            message = "Error: Tick the box to confirm.";
+            return;
+        }
+        if (!await Accounts.ReauthenticateAsync(user, Secret))
+        {
+            (SignInManager as AppSignInManager)?.RecordFailure();
+            message = WrongSecret;
+            return;
+        }
+        var deleted = await Accounts.SerializeAdminChangeAsync(async () =>
+        {
+            if (await Accounts.IsLastAdminAsync(user)) return false;
+            await Accounts.SoftDeleteAsync(user);
+            return true;
+        });
+        if (!deleted)
+        {
+            message = "Error: You are the last admin. Make someone else admin first.";
+            return;
+        }
+        await SignInManager.SignOutAsync();
+        Logger.LogInformation("User {UserId} deleted their account.", user.Id);
+        RedirectManager.RedirectTo("");
+    }
+}

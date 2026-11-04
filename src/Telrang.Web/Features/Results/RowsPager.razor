@@ -1,0 +1,36 @@
+@* The pager of a ballot table on the results page (DESIGN.md §31): "Ballots 51–100 of 1000" and plain links to the
+   pages before and after (?rows=N added to BaseHref's query, a full page load, no script). Nothing when everything fits
+   on one page. *@
+@if (Window.Pages > 1)
+{
+    <nav class="d-flex flex-wrap align-items-center gap-2 my-2 rows-pager" aria-label="@Label">
+        <span class="small text-secondary me-auto">@Noun @Window.First–@Window.Last of @Window.Total</span>
+        @if (Window.Page > 1)
+        {
+            <a class="btn btn-sm btn-outline-secondary" href="@Href(Window.Page - 1)" data-enhance-nav="false">Previous</a>
+        }
+        @if (Window.Page < Window.Pages)
+        {
+            <a class="btn btn-sm btn-outline-secondary" href="@Href(Window.Page + 1)" data-enhance-nav="false">Next</a>
+        }
+    </nav>
+}
+
+@code {
+    [Parameter, EditorRequired] public RowWindow Window { get; set; } = default!;
+
+    /// <summary>The page's address, with the query of its view if any (<c>p/{id}/results?view=ballots</c>).</summary>
+    [Parameter, EditorRequired] public string BaseHref { get; set; } = "";
+
+    /// <summary>The id of the table's heading, the links' fragment.</summary>
+    [Parameter, EditorRequired] public string Anchor { get; set; } = "";
+
+    [Parameter] public string Label { get; set; } = "Rows";
+
+    /// <summary>What the table's entries are called in "Rows 1–50 of 1000".</summary>
+    [Parameter] public string Noun { get; set; } = "Rows";
+
+    private string Href(int page) => page == 1
+        ? $"{BaseHref}#{Anchor}"
+        : $"{BaseHref}{(BaseHref.Contains('?') ? '&' : '?')}{ResultsQuery.Rows}={page}#{Anchor}";
+}

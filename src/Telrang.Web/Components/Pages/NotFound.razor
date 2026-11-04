@@ -1,0 +1,18 @@
+@page "/not-found"
+@layout PublicLayout
+
+<PageTitle>Not found</PageTitle>
+
+<h1>Not found</h1>
+<p>@(Hint ?? "Check the address, or ask whoever sent the link for a new one.")</p>
+
+@code {
+    private const string HintKey = "Telrang.NotFoundHint";
+
+    [CascadingParameter] private HttpContext? Http { get; set; }
+
+    private string? Hint => Http?.Items.TryGetValue(HintKey, out var hint) == true ? hint as string : null;
+
+    /// <summary>A page that answers 404 can leave one line saying what to do instead (e.g. an expired setup link).</summary>
+    public static void SetHint(HttpContext http, string hint) => http.Items[HintKey] = hint;
+}

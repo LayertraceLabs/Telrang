@@ -1,0 +1,11 @@
+@* Captcha for anonymous votes in public polls (admin setting, DESIGN.md §8, §21.1). Static: captcha.js renders the
+   provider's widget into this box from its data attributes; the widget puts its token into the vote form
+   (cf-turnstile-response / h-captcha-response) and BallotService verifies it once per submit. Needs JS. *@
+<div class="captcha-box" data-captcha="@Provider" data-sitekey="@SiteKey"></div>
+<p class="small text-danger" data-captcha-failed hidden>The check could not load. Reload the page.</p>
+<noscript><p class="small text-danger">Turn on JavaScript to vote in this poll.</p></noscript>
+
+@code {
+    [Parameter, EditorRequired] public CaptchaProvider Provider { get; set; }
+    [Parameter, EditorRequired] public string SiteKey { get; set; } = "";
+}

@@ -1,0 +1,151 @@
+@page "/setup/recover"
+@layout PublicLayout
+@* Admin recovery. Exists only while a recovery key is live: the operator
+   started the server with App__RecoveryKey=1 and copied the key from the log. *@
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject AccountService Accounts
+@inject EmailProtection Emails
+@inject RecoveryKey RecoveryKey
+@inject NavigationManager Nav
+
+<PageTitle>Recover admin</PageTitle>
+
+@if (done is not null)
+{
+    <h1>Admin recovered</h1>
+    <p>Log in as @done, then set up your authenticator app again.</p>
+    <p><a class="btn btn-primary" href="Account/Login">Log in</a></p>
+}
+else if (RecoveryKey.IsLive)
+{
+    <h1>Recover admin</h1>
+    <div class="row">
+        <div class="col-12 col-md-8 col-lg-6">
+            @if (error is not null)
+            {
+                <div class="alert alert-danger" role="alert">@error</div>
+            }
+            @if (admins is null)
+            {
+                <EditForm Model="KeyInput" method="post" OnValidSubmit="CheckKeyAsync" FormName="recover-key">
+                    <DataAnnotationsValidator />
+                    <FormGuardFields />
+                    <ValidationSummary class="text-danger" role="alert" />
+                    <div class="form-floating mb-3">
+                        <InputText @bind-Value="KeyInput.Key" id="KeyInput.Key" class="form-control font-monospace" autocomplete="off" spellcheck="false" placeholder="key" />
+                        <label for="KeyInput.Key">Recovery key (from the server log)</label>
+                    </div>
+                    <button type="submit" class="w-100 btn btn-lg btn-primary">Continue</button>
+                </EditForm>
+            }
+            else
+            {
+                <EditForm Model="ResetInput" method="post" OnValidSubmit="ResetAsync" FormName="recover-reset">
+                    <DataAnnotationsValidator />
+                    <FormGuardFields />
+                    <ValidationSummary class="text-danger" role="alert" />
+                    <input type="hidden" name="ResetInput.Key" value="@ResetInput.Key" />
+                    <div class="form-floating mb-3">
+                        <InputSelect @bind-Value="ResetInput.AdminId" id="ResetInput.AdminId" class="form-select">
+                            @foreach (var (id, email) in admins)
+                            {
+                                <option value="@id">@email</option>
+                            }
+                        </InputSelect>
+                        <label for="ResetInput.AdminId">Admin account</label>
+                    </div>
+                    <div class="form-floating mb-3">
+                        <InputText type="password" @bind-Value="ResetInput.Password" id="ResetInput.Password" class="form-control" autocomplete="new-password" placeholder="password" />
+                        <label for="ResetInput.Password">New password (12+ characters)</label>
+                    </div>
+                    <div class="form-floating mb-3">
+                        <InputText type="password" @bind-Value="ResetInput.ConfirmPassword" id="ResetInput.ConfirmPassword" class="form-control" autocomplete="new-password" placeholder="password" />
+                        <label for="ResetInput.ConfirmPassword">Confirm password</label>
+                    </div>
+                    <button type="submit" class="w-100 btn btn-lg btn-danger">Reset password, 2FA and passkeys</button>
+                </EditForm>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromForm(FormName = "recover-key")]
+    private KeyModel KeyInput { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "recover-reset")]
+    private ResetModel ResetInput { get; set; } = default!;
+
+    private IReadOnlyList<(string Id, string Email)>? admins;
+    private string? error;
+    private string? done;
+
+    protected override async Task OnInitializedAsync()
+    {
+        KeyInput ??= new();
+        ResetInput ??= new();
+        if (!RecoveryKey.IsLive)
+        {
+            Nav.NotFound();
+            return;
+        }
+        // Second step re-checks the key it carries; the admin list is shown only behind a valid key.
+        if (!string.IsNullOrEmpty(ResetInput.Key) && Accounts.CheckRecoveryKey(ResetInput.Key)) admins = await Accounts.ListAdminsAsync();
+    }
+
+    private async Task CheckKeyAsync()
+    {
+        if (!Accounts.CheckRecoveryKey(KeyInput.Key))
+        {
+            error = "Recovery key is wrong or expired.";
+            return;
+        }
+        admins = await Accounts.ListAdminsAsync();
+        ResetInput = new ResetModel { Key = KeyInput.Key.Trim(), AdminId = admins.FirstOrDefault().Id ?? "" };
+    }
+
+    private async Task ResetAsync()
+    {
+        var outcome = await Accounts.RecoverAdminAsync(ResetInput.Key, ResetInput.AdminId, ResetInput.Password);
+        switch (outcome.Status)
+        {
+            case AdminSetupStatus.Ok:
+                done = Emails.Display(outcome.User!.Email);
+                return;
+            case AdminSetupStatus.NotFound:
+                Nav.NotFound();
+                return;
+            case AdminSetupStatus.WrongKey:
+                admins = null;
+                error = outcome.Error;
+                return;
+            default:
+                error = outcome.Error;
+                return;
+        }
+    }
+
+    private sealed class KeyModel
+    {
+        [Required]
+        public string Key { get; set; } = "";
+    }
+
+    private sealed class ResetModel
+    {
+        [Required]
+        public string Key { get; set; } = "";
+
+        [Required]
+        public string AdminId { get; set; } = "";
+
+        [Required, StringLength(256, MinimumLength = 12, ErrorMessage = "The password must be at least {2} characters long.")]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+
+        [Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
+        [DataType(DataType.Password)]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

@@ -1,0 +1,23 @@
+@if (Message is not null)
+{
+    <div class="alert @(Ok ? "alert-info" : "alert-warning")" role="status">
+        <div>@Message</div>
+        @if (Link is not null)
+        {
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                <code class="one-time-link">@Link</code>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="@Link" data-copy-status="@statusId">Copy</button>
+                <span class="small" id="@statusId" role="status"></span>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public bool Ok { get; set; } = true;
+    [Parameter] public string? Link { get; set; }
+
+    private static int counter;
+    private readonly string statusId = "copy-status-" + Interlocked.Increment(ref counter).ToString(System.Globalization.CultureInfo.InvariantCulture);
+}

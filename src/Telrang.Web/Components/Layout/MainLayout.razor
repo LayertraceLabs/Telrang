@@ -1,0 +1,24 @@
+@inherits LayoutComponentBase
+@inject SettingsService Settings
+
+@* Signed-in pages (DESIGN.md §11): one of three app shells, chosen by Theme.Layout. A visitor who is not signed in
+   (the home page) gets the PublicLayout shell: no app navigation to show. *@
+<AuthorizeView>
+    <Authorized>
+        @switch (Settings.Current.Theme.Layout)
+        {
+            case Telrang.Web.Features.Branding.ThemeLayout.Sidebar:
+                <SidebarLayout Body="@Body" />
+                break;
+            case Telrang.Web.Features.Branding.ThemeLayout.Compact:
+                <CompactLayout Body="@Body" />
+                break;
+            default:
+                <TopBarLayout Body="@Body" />
+                break;
+        }
+    </Authorized>
+    <NotAuthorized>
+        <PublicLayout Body="@Body" />
+    </NotAuthorized>
+</AuthorizeView>

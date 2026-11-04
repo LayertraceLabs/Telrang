@@ -1,0 +1,85 @@
+﻿@page "/Account/Manage/GenerateRecoveryCodes"
+
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject AccountService Accounts
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<GenerateRecoveryCodes> Logger
+
+<PageTitle>New recovery codes</PageTitle>
+
+@if (recoveryCodes is not null)
+{
+    <ShowRecoveryCodes RecoveryCodes="recoveryCodes.ToArray()" StatusMessage="@message" />
+}
+else
+{
+    <StatusMessage Message="@message" />
+    <h2 class="h4">New recovery codes</h2>
+    <p>Old codes stop working.</p>
+    <div>
+        <form @formname="generate-recovery-codes" @onsubmit="OnSubmitAsync" method="post" class="d-flex flex-wrap align-items-end gap-2">
+            <AntiforgeryToken />
+            <div>
+                <label for="codes-secret" class="form-label small mb-0">Password or code</label>
+                <input id="codes-secret" name="@AccountEndpoints.ReauthField" type="password" class="form-control" autocomplete="current-password" required />
+            </div>
+            <button class="btn btn-danger" type="submit">Generate</button>
+        </form>
+    </div>
+}
+
+@code {
+    private string? message;
+    private ApplicationUser? user;
+    private IEnumerable<string>? recoveryCodes;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "generate-recovery-codes", Name = AccountEndpoints.ReauthField)]
+    private string? Secret { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        var isTwoFactorEnabled = await UserManager.GetTwoFactorEnabledAsync(user);
+        if (!isTwoFactorEnabled)
+        {
+            throw new InvalidOperationException("Cannot generate recovery codes for user because they do not have 2FA enabled.");
+        }
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        // Re-authentication (pentest AV-02): recovery codes are a lasting credential.
+        if (!await Accounts.ReauthenticateAsync(user, Secret))
+        {
+            (SignInManager as AppSignInManager)?.RecordFailure();
+            message = "Error: Password or code is wrong.";
+            return;
+        }
+
+        var userId = await UserManager.GetUserIdAsync(user);
+        recoveryCodes = await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+        message = "New recovery codes. The old ones no longer work.";
+        await Accounts.NotifySecurityChangeAsync(user, "New recovery codes were generated");
+
+        Logger.LogInformation("User with ID '{UserId}' has generated new 2FA recovery codes.", userId);
+    }
+}

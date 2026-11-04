@@ -1,0 +1,64 @@
+@* Read-only view of one of the visitor's own responses (ranking and bans, points, or availability: the dates list view). *@
+@if (Ballot.Ranked is { } r)
+{
+    @if (r.Ranked.Count == 0)
+    {
+        <p class="text-secondary mb-2">Nothing ranked.</p>
+    }
+    else
+    {
+        <ol class="list-group list-group-numbered mb-2">
+            @foreach (var key in r.Ranked)
+            {
+                <li class="list-group-item" @key="key">@Label(key)</li>
+            }
+        </ol>
+    }
+    @if (r.Banned.Count > 0)
+    {
+        <p class="small mb-2"><span class="fw-semibold">Banned:</span> @string.Join(", ", r.Banned.Select(Label))</p>
+    }
+}
+else if (Ballot.Points is { } p)
+{
+    var given = Definition.Questions[0].Options.Where(o => p.Points.GetValueOrDefault(o.Key) > 0).ToList();
+    @if (given.Count == 0)
+    {
+        <p class="text-secondary mb-2">No points given.</p>
+    }
+    else
+    {
+        <ul class="list-group mb-2">
+            @foreach (var o in given)
+            {
+                <li class="list-group-item d-flex justify-content-between gap-2" @key="o.Key">
+                    <span class="text-break">@o.Label</span>
+                    <span class="fw-semibold text-nowrap">@p.Points[o.Key] @(p.Points[o.Key] == 1 ? "point" : "points")</span>
+                </li>
+            }
+        </ul>
+    }
+    <p class="small mb-2">@p.Points.Values.Sum() of @(Definition.Questions[0].Budget ?? 0) points used.</p>
+}
+else if (Ballot.Dates is { } dts)
+{
+    <ul class="list-group mb-2 dates-ballot">
+        @foreach (var o in Definition.Questions[0].Options)
+        {
+            <li class="list-group-item dates-list-row" @key="o.Key">
+                <span class="dates-list-text text-break">@DatesFormat.LongLabel(o)</span>
+                <span class="dates-list-cell">
+                    <DatesCell Option="o" View="DatesView.List" ReadOnly="true" AllowMaybe="Definition.Questions[0].Maybe"
+                               Value="@dts.Answers.GetValueOrDefault(o.Key, Telrang.Core.Ballots.Availability.No)" />
+                </span>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public MyBallot Ballot { get; set; } = default!;
+
+    private string Label(string key) => Definition.Questions[0].Options.FirstOrDefault(o => o.Key == key)?.Label ?? key;
+}

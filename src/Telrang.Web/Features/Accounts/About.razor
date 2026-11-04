@@ -1,0 +1,22 @@
+@page "/about"
+@layout PublicLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = AppPolicies.NotGated)]
+@inject SettingsService Settings
+@inject NavigationManager Nav
+
+<PageTitle>About - @Settings.AppName</PageTitle>
+
+@if (markdown is not null)
+{
+    <div class="legal-page">@MarkdownRenderer.Render(markdown, MarkdownRenderer.AdminMaxLength)</div>
+}
+
+@code {
+    private string? markdown;
+
+    protected override void OnInitialized()
+    {
+        markdown = Settings.Current.LegalPageMarkdown;
+        if (markdown is null) Nav.NotFound();
+    }
+}

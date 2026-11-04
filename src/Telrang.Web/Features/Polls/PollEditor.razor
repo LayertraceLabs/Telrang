@@ -1,0 +1,830 @@
+@using Telrang.Web.Features.Accounts
+@using Telrang.Web.Features.Voting
+@* The poll form (DESIGN.md §20.2). Code: PollEditor.razor.cs. Field ids come from DraftError paths (Fid), each error sits
+   under its control and is referenced by aria-describedby. *@
+@{ claimed.Clear(); calendarShown = false; }
+
+<div class="row g-4 editor-layout" data-draft-key="@DraftKey">
+    <div class="col-lg-7 editor-form">
+        <CascadingValue Value="help">
+        <div class="editor-help-row">
+            <HelpAllButton State="help" Changed="StateHasChanged" />
+        </div>
+        @if (restored)
+        {
+            <p class="small alert alert-info py-1 px-2 mb-3 draft-notice" role="status">
+                Draft restored. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="DiscardDraftAsync">Discard</button>
+            </p>
+        }
+
+        @* ---- Basics ---- *@
+        <section class="editor-section" aria-labelledby="@uid-basics">
+            <h2 class="h5 editor-heading" id="@uid-basics">Basics</h2>
+            <div class="mb-3">
+                <label class="form-label" for="@Id("title")">Title</label>
+                <input id="@Id("title")" class="form-control @Invalid("title")" maxlength="@(Polls.CurrentLimits.TitleMax + 50)"
+                       aria-describedby="@DescribedBy("title")" aria-invalid="@AriaInvalid("title")"
+                       @bind="draft.Title" @bind:event="oninput" @bind:after="@(() => Changed("title"))" />
+                @FieldErrors("title")
+            </div>
+            <div class="mb-1">
+                <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-1">
+                    <label class="form-label mb-0" for="@Id("description")">Description</label>
+                    @Segmented("descmode", [("Write", !descriptionPreview, () => { descriptionPreview = false; return Task.CompletedTask; }),
+                                            ("Preview", descriptionPreview, () => { descriptionPreview = true; return Task.CompletedTask; })], "Description view", small: true)
+                </div>
+                @if (descriptionPreview)
+                {
+                    <div class="editor-md-preview poll-markdown">
+                        @if (string.IsNullOrWhiteSpace(draft.Description))
+                        {
+                            <span class="text-secondary">Nothing to preview.</span>
+                        }
+                        else if (draft.Description.Trim().Length > Polls.CurrentLimits.DescriptionMax)
+                        {
+                            <span class="text-secondary">Too long to preview.</span>
+                        }
+                        else
+                        {
+                            @MarkdownRenderer.Render(draft.Description)
+                        }
+                    </div>
+                }
+                else
+                {
+                    <textarea id="@Id("description")" class="form-control editor-textarea @Invalid("description")" rows="5"
+                              aria-describedby="@DescribedBy("description", Id("description") + "-count")" aria-invalid="@AriaInvalid("description")"
+                              @bind="draft.Description" @bind:event="oninput" @bind:after="@(() => Changed("description"))"></textarea>
+                }
+                <div class="d-flex justify-content-between gap-2 form-text">
+                    <span>Markdown</span>
+                    <span id="@(Id("description"))-count" class="editor-count @((draft.Description ?? "").Trim().Length > Polls.CurrentLimits.DescriptionMax ? "editor-count-over" : "")">
+                        @((draft.Description ?? "").Trim().Length) / @Polls.CurrentLimits.DescriptionMax
+                    </span>
+                </div>
+                @FieldErrors("description")
+            </div>
+        </section>
+
+        @* ---- Type and its settings (new poll; fixed afterwards, DESIGN.md §26) ---- *@
+        @if (Existing is null)
+        {
+        <section class="editor-section" aria-labelledby="@uid-type">
+            <h2 class="h5 editor-heading" id="@uid-type">Type</h2>
+            <div class="mb-3">
+                <div class="d-flex flex-wrap align-items-center gap-1">
+                    @Segmented("type", [
+                        ("Ranked", Type == PollType.Ranked, () => SetTypeAsync(PollType.Ranked)),
+                        ("Points", Type == PollType.Points, () => SetTypeAsync(PollType.Points)),
+                        ("Dates", Type == PollType.Dates, () => SetTypeAsync(PollType.Dates))], "Poll type")
+                    @TypeHelp()
+                </div>
+                @FieldErrors($"{Q}.type")
+            </div>
+
+            @switch (Type)
+            {
+                case PollType.Ranked:
+                    <div class="row g-3 mb-2">
+                        <div class="col-sm-6 option-field">
+                            <label class="form-label" for="@Id($"{Q}.scoring")">Scoring</label>
+                            @ScoringHelp()
+                            <select id="@Id($"{Q}.scoring")" class="form-select @Invalid($"{Q}.scoring")" aria-describedby="@DescribedBy($"{Q}.scoring")"
+                                    @bind="Question.Scoring" @bind:after="@(() => Changed($"{Q}.scoring"))">
+                                <option value="@ScoringScheme.Borda">@PollText.ScoringName(ScoringScheme.Borda)</option>
+                                <option value="@ScoringScheme.Dowdall">@PollText.ScoringName(ScoringScheme.Dowdall)</option>
+                            </select>
+                            @FieldErrors($"{Q}.scoring")
+                        </div>
+                        <div class="col-sm-6 option-field">
+                            <label class="form-label" for="@Id($"{Q}.bans")">Bans per voter</label>
+                            @BansHelp()
+                            <input id="@Id($"{Q}.bans")" type="number" min="0" step="1" inputmode="numeric" class="form-control editor-number @Invalid($"{Q}.bans")"
+                                   aria-describedby="@DescribedBy($"{Q}.bans", Id($"{Q}.bans") + "-hint")" aria-invalid="@AriaInvalid($"{Q}.bans")"
+                                   @bind="Question.Bans" @bind:after="@(() => Changed($"{Q}.bans"))" />
+                            <div class="form-text" id="@(Id($"{Q}.bans"))-hint">0 = no bans</div>
+                            @FieldErrors($"{Q}.bans")
+                        </div>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="@Id($"{Q}.rankAll")" @bind="Question.RankAll" @bind:after="@(() => Changed($"{Q}.rankAll"))" />
+                        <label class="form-check-label" for="@Id($"{Q}.rankAll")">Rank all</label>
+                        @RankAllHelp()
+                    </div>
+                    break;
+                case PollType.Points:
+                    <div class="row g-3 mb-2">
+                        <div class="col-sm-6 option-field">
+                            <label class="form-label" for="@Id($"{Q}.budget")">Budget</label>
+                            @BudgetHelp()
+                            <input id="@Id($"{Q}.budget")" type="number" min="1" step="1" inputmode="numeric" class="form-control editor-number @Invalid($"{Q}.budget")"
+                                   aria-describedby="@DescribedBy($"{Q}.budget")" aria-invalid="@AriaInvalid($"{Q}.budget")"
+                                   @bind="Question.Budget" @bind:after="@(() => Changed($"{Q}.budget"))" />
+                            @FieldErrors($"{Q}.budget")
+                        </div>
+                        <div class="col-sm-6 option-field">
+                            <label class="form-label" for="@Id($"{Q}.maxPerOption")">Cap per option</label>
+                            @CapHelp()
+                            <input id="@Id($"{Q}.maxPerOption")" type="number" min="1" step="1" inputmode="numeric" class="form-control editor-number @Invalid($"{Q}.maxPerOption")"
+                                   aria-describedby="@DescribedBy($"{Q}.maxPerOption", Id($"{Q}.maxPerOption") + "-hint")" aria-invalid="@AriaInvalid($"{Q}.maxPerOption")"
+                                   @bind="Question.MaxPerOption" @bind:after="@(() => Changed($"{Q}.maxPerOption"))" />
+                            <div class="form-text" id="@(Id($"{Q}.maxPerOption"))-hint">Empty = no cap</div>
+                            @FieldErrors($"{Q}.maxPerOption")
+                        </div>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="@Id($"{Q}.spendAll")" @bind="Question.SpendAll" @bind:after="@(() => Changed($"{Q}.spendAll"))" />
+                        <label class="form-check-label" for="@Id($"{Q}.spendAll")">Spend all</label>
+                        @SpendAllHelp()
+                    </div>
+                    break;
+                case PollType.Dates:
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="@Id($"{Q}.maybe")" @bind="Question.Maybe" @bind:after="@(() => Changed($"{Q}.maybe"))" />
+                        <label class="form-check-label" for="@Id($"{Q}.maybe")">Allow maybe</label>
+                        @MaybeHelp()
+                    </div>
+                    break;
+                default:
+                    throw new InvalidOperationException();
+            }
+        </section>
+        }
+
+        @* ---- Options ---- *@
+        <section class="editor-section" aria-labelledby="@uid-options">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <h2 class="h5 editor-heading mb-0" id="@uid-options">@(Type == PollType.Dates ? "Dates" : "Options")</h2>
+                @Segmented("optmode", [
+                    (Type == PollType.Dates ? "Calendar" : "List", !textMode, () => SetTextModeAsync(false)),
+                    ("Text", textMode, () => SetTextModeAsync(true))], "Options editor", small: true)
+            </div>
+            @if (textMode)
+            {
+                @OptionsText()
+            }
+            else if (Type == PollType.Dates)
+            {
+                @DatesCalendar()
+            }
+            else
+            {
+                @OptionsList()
+            }
+            @FieldErrors($"{Q}.options")
+        </section>
+
+        @if (Existing is null)
+        {
+        @* ---- Voting ---- *@
+        <section class="editor-section" aria-labelledby="@uid-voting">
+            <h2 class="h5 editor-heading" id="@uid-voting">Voting</h2>
+            @Radios("voters", "Who votes", VotersHelp(), [
+                ("Anyone with the link", draft.VoterMode == VoterMode.Public, () => SetAsync(() => draft.VoterMode = VoterMode.Public, "voters")),
+                ("Signed-in accounts", draft.VoterMode == VoterMode.Accounts, () => SetAsync(() => draft.VoterMode = VoterMode.Accounts, "voters")),
+                ("Invite links", draft.VoterMode == VoterMode.Invite, () => SetAsync(() => draft.VoterMode = VoterMode.Invite, "voters"))])
+            @Radios("responses", "Responses", ResponsesHelp(), [
+                ("One", draft.Responses == ResponsePolicy.One, () => SetAsync(() => draft.Responses = ResponsePolicy.One, "responses")),
+                ("Several", draft.Responses == ResponsePolicy.Many, () => SetAsync(() => draft.Responses = ResponsePolicy.Many, "responses"))])
+            @Radios("names", "Names", NamesHelp(), [
+                ("None", draft.Names == NamesMode.None, () => SetAsync(() => draft.Names = NamesMode.None, "names")),
+                ("Optional", draft.Names == NamesMode.Optional, () => SetAsync(() => draft.Names = NamesMode.Optional, "names")),
+                ("Required", draft.Names == NamesMode.Required, () => SetAsync(() => draft.Names = NamesMode.Required, "names"))])
+        </section>
+
+        @* ---- Results (DESIGN.md §25) ---- *@
+        <section class="editor-section" aria-labelledby="@uid-results">
+            <h2 class="h5 editor-heading" id="@uid-results">Results</h2>
+            @Radios("results", "Results for", ResultsForHelp(), [
+                ("Owner only", draft.ResultsVisibility == ResultsVisibility.Creator, () => SetAsync(() => draft.ResultsVisibility = ResultsVisibility.Creator, "results")),
+                ("Voters", draft.ResultsVisibility == ResultsVisibility.AfterVote, () => SetAsync(() => draft.ResultsVisibility = ResultsVisibility.AfterVote, "results")),
+                ("Anyone with the link", draft.ResultsVisibility == ResultsVisibility.Open, () => SetAsync(() => draft.ResultsVisibility = ResultsVisibility.Open, "results"))],
+                disabled: i => i == 2 && draft.VoterMode != VoterMode.Public)
+            @Radios("resultsTiming", "Show results", ResultsTimingHelp(), [
+                ("While voting", draft.ResultsTiming == ResultsTiming.WhileOpen, () => SetAsync(() => draft.ResultsTiming = ResultsTiming.WhileOpen, "resultsTiming")),
+                ("After closing", draft.ResultsTiming == ResultsTiming.AfterClose, () => SetAsync(() => draft.ResultsTiming = ResultsTiming.AfterClose, "resultsTiming"))],
+                disabled: _ => draft.ResultsVisibility == ResultsVisibility.Creator)
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="@Id("showBallots")" disabled="@(draft.Names == NamesMode.None)"
+                       aria-describedby="@DescribedBy("showBallots")" @bind="draft.ShowBallots" @bind:after="@(() => SetAsync(() => { }, "showBallots"))" />
+                <label class="form-check-label" for="@Id("showBallots")">Show ballots to voters</label>
+                @ShowBallotsHelp()
+                @FieldErrors("showBallots")
+            </div>
+        </section>
+        }
+        else
+        {
+            @FixedSettings()
+        }
+
+        @* ---- Closing ---- *@
+        <section class="editor-section" aria-labelledby="@uid-closing">
+            <h2 class="h5 editor-heading" id="@uid-closing">Closing</h2>
+            <div class="row g-3">
+                <div class="col-sm-6 option-field">
+                    <label class="form-label" for="@Id("closesOn")">Closes on</label>
+                    <OptionHelp Label="Closes on">
+                        <p>The poll closes at the end of this day in the poll's time zone: voting stops, the results stay. Empty:
+                            it closes automatically after the site's maximum poll duration, or stays open when there is none (the
+                            line under the field says which).</p>
+                        <p>The share page closes the poll early or reopens it; a later date here reopens a poll closed by its date.</p>
+                    </OptionHelp>
+                    <input id="@Id("closesOn")" type="date" class="form-control @Invalid("closesOn")"
+                           max="@LatestClose?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)"
+                           aria-describedby="@DescribedBy("closesOn", Id("closesOn") + "-hint")" aria-invalid="@AriaInvalid("closesOn")"
+                           @bind="draft.ClosesOn" @bind:after="@(() => Changed("closesOn"))" />
+                    <div class="form-text" id="@(Id("closesOn"))-hint">@AutoCloseText</div>
+                    @FieldErrors("closesOn")
+                </div>
+                @if (Existing is null)
+                {
+                <div class="col-sm-6 option-field">
+                    <label class="form-label" for="@Id("timezone")">Time zone</label>
+                    @TimeZoneHelp()
+                    <input id="@Id("timezone")" class="form-control @Invalid("timezone")" list="@uid-zones" autocomplete="off" spellcheck="false"
+                           placeholder="@(DefaultTimeZone ?? PollTime.Utc)"
+                           aria-describedby="@DescribedBy("timezone")" aria-invalid="@AriaInvalid("timezone")"
+                           @bind="draft.TimeZone" @bind:after="@(() => Changed("timezone"))" />
+                    <datalist id="@uid-zones">
+                        @foreach (var z in TimeZones.All)
+                        {
+                            <option value="@z"></option>
+                        }
+                    </datalist>
+                    @FieldErrors("timezone")
+                </div>
+                }
+            </div>
+        </section>
+
+        @{ var unplaced = Unplaced.ToList(); }
+        @if (unplaced.Count > 0)
+        {
+            <div class="alert alert-danger mt-3 mb-0" role="alert">
+                <ul class="mb-0 ps-3">
+                    @foreach (var e in unplaced)
+                    {
+                        <li>@e.Message</li>
+                    }
+                </ul>
+            </div>
+        }
+        </CascadingValue>
+        @ChildContent
+    </div>
+
+    <div class="col-lg-5 editor-preview-col">
+        <div class="editor-preview">
+            <h2 class="h6 text-secondary text-uppercase editor-preview-title">Preview</h2>
+            <PollPreview Draft="draft" Definition="result.Definition" DefaultTimeZone="@DefaultTimeZone" Limits="Polls.CurrentLimits" />
+        </div>
+    </div>
+</div>
+
+@code {
+    // ---- option help (DESIGN.md §23.4), written from Core's scoring and validator and PollAccessService ----
+
+    private RenderFragment TypeHelp() => __builder =>
+    {
+        <OptionHelp Label="Poll type">
+            <p><strong>Ranked</strong>: voters put the options in order and may ban some; the order becomes points (Scoring).</p>
+            <p><strong>Points</strong>: voters split a budget of points over the options; each option's points are added up.</p>
+            <p><strong>Dates</strong>: voters answer yes or no (or maybe) for each date or time slot; the dates with the most
+                yes come first.</p>
+            <p>The type is fixed once the poll is created.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment ScoringHelp() => __builder =>
+    {
+        <OptionHelp Label="Scoring">
+            <p><strong>Borda</strong>: with N options, first place earns N points, second N−1, down to 1 for last place.
+                <strong>Dowdall</strong>: first place earns 1, second 1/2, third 1/3, and so on. An option a voter leaves
+                unranked or bans earns 0 from that voter.</p>
+            <p>Four options; two voters rank A, B, C, D and one ranks B, C, D, A. Borda: B 10, A 9, C 7, D 4. Dowdall: A 2.25,
+                B 2, C 1.17, D 0.83.</p>
+            <p>Borda favours the option most voters rank fairly high (a compromise); Dowdall weighs first places more (the
+                option many put on top). Fixed once the poll is created.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment BansHelp() => __builder =>
+    {
+        <OptionHelp Label="Bans per voter">
+            <p>How many options each voter may ban: reject outright. A banned option earns no points from that
+                voter, the same as an unranked one, and cannot also be ranked.</p>
+            <p>Bans never subtract from a score. The results show each option's ban count, and between equal
+                scores the option with fewer bans comes first. Fewer bans than options.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment RankAllHelp() => __builder =>
+    {
+        <OptionHelp Label="Rank all">
+            <p>Every option must be ranked or banned before the ballot can be sent. Off: voters may rank only
+                some options; the others earn no points from them. An option added later must then be ranked too when a
+                voter changes their ballot.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment BudgetHelp() => __builder =>
+    {
+        <OptionHelp Label="Budget">
+            <p>The points each voter splits over the options, 1 or more. The results add up each option's points
+                over all ballots and show the mean per voter.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment CapHelp() => __builder =>
+    {
+        <OptionHelp Label="Cap per option">
+            <p>The most points one voter may give a single option, at most the budget. With a budget of 100 and a
+                cap of 60, nobody can put more than 60 on their favourite; the rest goes elsewhere.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment SpendAllHelp() => __builder =>
+    {
+        <OptionHelp Label="Spend all">
+            <p>A ballot can be sent only when it spends exactly the budget. Off: voters may spend less; unspent
+                points count for no option.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment MaybeHelp() => __builder =>
+    {
+        <OptionHelp Label="Allow maybe">
+            <p>Voters can answer maybe as well as yes and no. The results rank dates by their yes count, and equal
+                yes counts by maybe. Off: yes or no only.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment TimeZoneHelp() => __builder =>
+    {
+        <OptionHelp Label="Time zone">
+            <p>The zone of the close date and of the times of date options, which are shown as typed with the zone
+                named. The closing time is shown to each viewer in their account's time zone, else in this one.</p>
+            <p>A new poll starts with your account's time zone, else this browser's.</p>
+        </OptionHelp>
+    };
+
+    private RenderFragment ShowBallotsHelp() => __builder =>
+    {
+        <OptionHelp Label="Show ballots to voters">
+            <p>Whoever sees the results also sees every response: the name as entered (blank: Anonymous) and the answers.
+                Never who sent it, when, or your aliases. Only when the poll asks for names.</p>
+            <p>Ballots appear in voting order, so someone watching the results while people vote can tell which one is new.</p>
+        </OptionHelp>
+    };
+
+    /// <summary>
+    /// On edit (DESIGN.md §26): the settings fixed at creation as read-only text, each with its help. A different setup is a
+    /// copy of the poll.
+    /// </summary>
+    private RenderFragment FixedSettings() => __builder =>
+    {
+        var e = Existing!;
+        var q = e.Questions[0];
+        <section class="editor-section" aria-labelledby="@uid-fixed">
+            <h2 class="h5 editor-heading" id="@uid-fixed">Settings</h2>
+            <p class="small text-secondary mb-2 editor-fixed-note"><Icon Name="lock" /> Fixed when the poll was created.</p>
+            <div class="editor-fixed">
+                @Fixed("Poll type", PollText.TypeName(q.Type), TypeHelp())
+                @switch (q.Type)
+                {
+                    case PollType.Ranked:
+                        @Fixed("Scoring", PollText.ScoringName(q.Scoring), ScoringHelp())
+                        @Fixed("Bans per voter", q.MaxBans == 0 ? "None" : q.MaxBans.ToString(System.Globalization.CultureInfo.InvariantCulture), BansHelp())
+                        @Fixed("Rank all", YesNo(q.RankAll), RankAllHelp())
+                        break;
+                    case PollType.Points:
+                        @Fixed("Budget", (q.Budget ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture), BudgetHelp())
+                        @Fixed("Cap per option", q.MaxPerOption is int cap ? cap.ToString(System.Globalization.CultureInfo.InvariantCulture) : "None", CapHelp())
+                        @Fixed("Spend all", YesNo(q.SpendAll), SpendAllHelp())
+                        break;
+                    case PollType.Dates:
+                        @Fixed("Allow maybe", YesNo(q.Maybe), MaybeHelp())
+                        break;
+                    default:
+                        throw new InvalidOperationException();
+                }
+                @Fixed("Who votes", e.Voters switch { VoterMode.Accounts => "Signed-in accounts", VoterMode.Invite => "Invite links", _ => "Anyone with the link" },
+                    Wrapped("Who votes", VotersHelp()))
+                @Fixed("Responses", e.Responses == ResponsePolicy.Many ? "Several" : "One", Wrapped("Responses", ResponsesHelp()))
+                @Fixed("Names", e.Names switch { NamesMode.None => "None", NamesMode.Required => "Required", _ => "Optional" }, Wrapped("Names", NamesHelp()))
+                @Fixed("Results for", e.Results switch { ResultsVisibility.Creator => "Owner only", ResultsVisibility.Open => "Anyone with the link", _ => "Voters" },
+                    Wrapped("Results for", ResultsForHelp()))
+                @Fixed("Show results", e.ResultsTiming == ResultsTiming.AfterClose ? "After closing" : "While voting", Wrapped("Show results", ResultsTimingHelp()))
+                @Fixed("Show ballots to voters", YesNo(e.ShowBallots), ShowBallotsHelp())
+                @Fixed("Time zone", e.TimeZone ?? PollTime.Utc, TimeZoneHelp())
+            </div>
+        </section>
+    };
+
+    private static string YesNo(bool b) => b ? "Yes" : "No";
+
+    private RenderFragment Wrapped(string label, RenderFragment help) => __builder =>
+    {
+        <OptionHelp Label="@label">@help</OptionHelp>
+    };
+
+    private RenderFragment Fixed(string label, string value, RenderFragment help) => __builder =>
+    {
+        <div class="editor-fixed-row option-field">
+            <span class="editor-fixed-label">@label</span>
+            @help
+            <span class="editor-fixed-value">@value</span>
+        </div>
+    };
+
+    private RenderFragment VotersHelp() => __builder =>
+    {
+        <ul>
+            <li><strong>Anyone with the link</strong>: no account needed. A visitor who is not signed in votes as their browser
+                (a cookie), a signed-in visitor as their account. The site may ask visitors who are not signed in for a
+                captcha.</li>
+            <li><strong>Signed-in accounts</strong>: voters need an account on this site with a verified email. Others can open
+                the poll but not vote.</li>
+            <li><strong>Invite links</strong>: each voter needs a personal link, made on the share page once the poll exists. No
+                account needed; once a signed-in voter uses a link, it belongs to that account.</li>
+        </ul>
+    };
+
+    private RenderFragment ResponsesHelp() => __builder =>
+    {
+        <p><strong>One</strong>: one response per voter, which they can change until the poll closes. <strong>Several</strong>:
+            a voter can send more than one and change or delete each; the site may cap how many.</p>
+        <p>One voter is:</p>
+        <ul>
+            <li>with Anyone with the link, a browser, or an account when signed in. An honour system: another browser counts as
+                another voter.</li>
+            <li>with Signed-in accounts, an account.</li>
+            <li>with Invite links, a link: with Several, one link can answer for a household or a team.</li>
+        </ul>
+    };
+
+    private RenderFragment NamesHelp() => __builder =>
+    {
+        <p><strong>None</strong>: the vote form asks for no name. <strong>Optional</strong>: it asks for a name that may stay
+            empty. <strong>Required</strong>: a name must be given.</p>
+        <p>You see the names: in the responses on the share page, in the ballots CSV and, for dates polls, in the results
+            grid of who can when. Voters see them only with Show ballots to voters.</p>
+    };
+
+    private RenderFragment ResultsForHelp() => __builder =>
+    {
+        <ul>
+            <li><strong>Owner only</strong>: only you.</li>
+            <li><strong>Voters</strong>: a voter, once they have sent a response, from the browser, account or link they voted
+                with.</li>
+            <li><strong>Anyone with the link</strong>: everyone who can open the poll page, voted or not. Only for polls anyone
+                with the link can vote in: the address of an invite or account poll never shows its results.</li>
+        </ul>
+        <p>You always see the results, live.</p>
+    };
+
+    private RenderFragment ResultsTimingHelp() => __builder =>
+    {
+        <p><strong>While voting</strong>: the results show the responses so far while the poll is open; to voters once they
+            have voted, with Anyone with the link right away. <strong>After closing</strong>: nobody but you sees them until
+            the poll closes, by its date or when you close it.</p>
+        <p>With Owner only this stays While voting.</p>
+    };
+
+    private Task SetAsync(Action set, string field)
+    {
+        set();
+        Normalise(draft);
+        return ChangedAsync(field);
+    }
+
+    private RenderFragment FieldErrors(string field) => __builder =>
+    {
+        var messages = ErrorsOf(field);
+        if (messages.Count > 0)
+        {
+            <div class="invalid-feedback d-block" id="@ErrId(field)">
+                @foreach (var m in messages)
+                {
+                    <div>@m</div>
+                }
+            </div>
+        }
+    };
+
+    /// <summary>Segmented buttons: radio inputs (keyboard: arrows) styled as one control.</summary>
+    private RenderFragment Segmented(string group, IReadOnlyList<(string Label, bool Checked, Func<Task> Select)> items, string label, bool small = false) => __builder =>
+    {
+        <div class="seg @(small ? "seg-sm" : "")" role="radiogroup" aria-label="@label" @key="@($"{group}-{segNonce}")">
+            @for (var i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                var id = $"{Name(group)}-{i}";
+                <input type="radio" class="btn-check" name="@Name(group)" id="@id" checked="@item.Checked" @onchange="item.Select" />
+                <label class="seg-btn" for="@id">@item.Label</label>
+            }
+        </div>
+    };
+
+    /// <summary>A radio group with its option help: the legend for assistive technology, the same text shown beside the
+    /// help toggle, the panel under the radios.</summary>
+    private RenderFragment Radios(string field, string legend, RenderFragment help, IReadOnlyList<(string Label, bool Checked, Func<Task> Select)> items,
+        Func<int, bool>? disabled = null) => __builder =>
+    {
+        <fieldset class="mb-3" aria-describedby="@DescribedBy(field)">
+            <legend class="visually-hidden">@legend</legend>
+            <div class="option-field">
+            <span class="form-label fs-6 mb-1" aria-hidden="true">@legend</span>
+            <OptionHelp Label="@legend">@help</OptionHelp>
+            <div class="editor-radios">
+                @for (var i = 0; i < items.Count; i++)
+                {
+                    var item = items[i];
+                    var id = $"{Name(field)}-{i}";
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="@Name(field)" id="@id" checked="@item.Checked" disabled="@(disabled?.Invoke(i) == true)"
+                               @onchange="item.Select" />
+                        <label class="form-check-label" for="@id">@item.Label</label>
+                    </div>
+                }
+            </div>
+            @FieldErrors(field)
+            </div>
+        </fieldset>
+    };
+
+    private RenderFragment OptionsList() => __builder =>
+    {
+        <ol class="editor-options">
+            @for (var i = 0; i < Question.Options.Count; i++)
+            {
+                var index = i;
+                var o = Question.Options[i];
+                var labelField = OptionField(index, "label");
+                var descField = OptionField(index, "description");
+                var n = index + 1;
+                <li class="editor-option" @key="KeyOf(o)">
+                    <div class="editor-option-main">
+                        <span class="editor-option-num" aria-hidden="true">@n</span>
+                        <input id="@Id(labelField)" class="form-control @Invalid(labelField)" aria-label="Option @n"
+                               aria-describedby="@DescribedBy(labelField)" aria-invalid="@AriaInvalid(labelField)"
+                               @ref="labelRefs[o]"
+                               @bind="o.Label" @bind:event="oninput" @bind:after="@(() => Changed($"{Q}.options[{index}]"))" />
+                        <div class="editor-option-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary btn-icon" aria-label="Move option @n up" title="Move up"
+                                    disabled="@(index == 0)" @onclick="() => MoveAsync(index, -1)"><Icon Name="arrow-up" /></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary btn-icon" aria-label="Move option @n down" title="Move down"
+                                    disabled="@(index == Question.Options.Count - 1)" @onclick="() => MoveAsync(index, 1)"><Icon Name="arrow-down" /></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary btn-icon" aria-label="Remove option @n" title="Remove"
+                                    @onclick="() => RemoveAsync(index)"><Icon Name="x" /></button>
+                        </div>
+                    </div>
+                    @FieldErrors(labelField)
+                    <details class="editor-details" open="@detailsOpen.Contains(o)">
+                        <summary>Details</summary>
+                        <textarea id="@Id(descField)" class="form-control editor-textarea mt-1 @Invalid(descField)" rows="3" aria-label="Details of option @n (Markdown)"
+                                  aria-describedby="@DescribedBy(descField)" aria-invalid="@AriaInvalid(descField)"
+                                  @bind="o.Description" @bind:event="oninput"
+                                  @bind:after="@(() => { detailsOpen.Add(o); return Changed($"{Q}.options[{index}]"); })"></textarea>
+                        @FieldErrors(descField)
+                    </details>
+                </li>
+            }
+        </ol>
+        <button type="button" class="btn btn-outline-primary btn-sm" disabled="@AtMax" @onclick="AddOption"><Icon Name="plus" /> Add option</button>
+    };
+
+    private RenderFragment OptionsText() => __builder =>
+    {
+        var textId = $"{uid}-options-text";
+        <label class="visually-hidden" for="@textId">@(Type == PollType.Dates ? "Dates, one per line" : "Options, one per line")</label>
+        <textarea id="@textId" class="form-control font-monospace editor-options-text @(textErrors.Count > 0 ? "is-invalid" : "")" rows="10" spellcheck="false"
+                  autocapitalize="off" autocomplete="off" aria-describedby="help-@textId-format @(textErrors.Count > 0 ? textId + "-err" : "")"
+                  aria-invalid="@(textErrors.Count > 0 ? "true" : null)"
+                  maxlength="@OptionListParser.MaxTextLength(Polls.CurrentLimits)"
+                  @bind="optionsText" @bind:after="OnTextChangedAsync"></textarea>
+        <div class="d-flex flex-wrap align-items-center gap-1 mt-1">
+            <span class="form-text mt-0" aria-hidden="true">Text format</span>
+            <OptionHelp Label="Text format" Id="@($"{textId}-format")">
+                <p>One option per line. Indented lines under an option are its details (Markdown).</p>
+                @if (Type == PollType.Dates)
+                {
+                    <p>One date per line: <code>2026-11-03</code> (all day), <code>2026-11-05 19:00</code> (a start time),
+                        <code>2026-11-07 18:30-21:00</code> (a time slot), <code>2026-11-10 to 2026-11-14</code> (one option per
+                        day). Times are in the poll's time zone. Years 0001 to 9999; dates before 1582 are proleptic Gregorian
+                        (the Gregorian calendar extended backwards). At most @DatesMax dates and times.</p>
+                }
+            </OptionHelp>
+        </div>
+        @if (textErrors.Count > 0)
+        {
+            <div class="invalid-feedback d-block" id="@textId-err">
+                @foreach (var e in textErrors.Take(OptionListParser.MaxErrors + 1))
+                {
+                    <div>@(e.Line > 0 ? $"Line {e.Line}: " : "")@e.Message</div>
+                }
+                @if (moreTextErrors > 0)
+                {
+                    <div>…and @moreTextErrors more.</div>
+                }
+            </div>
+        }
+        else
+        {
+            @* Validator errors by option index, while editing as text. *@
+            var optionErrors = new List<string>();
+            for (var i = 0; i < Question.Options.Count; i++)
+            {
+                foreach (var f in new[] { "label", "description", "date", "start", "end" })
+                {
+                    optionErrors.AddRange(ErrorsOf(OptionField(i, f)).Select(m => $"Option {i + 1}: {m}"));
+                }
+            }
+            if (optionErrors.Count > 0)
+            {
+                <div class="invalid-feedback d-block">
+                    @foreach (var m in optionErrors)
+                    {
+                        <div>@m</div>
+                    }
+                </div>
+            }
+        }
+    };
+
+    private RenderFragment DatesCalendar() => __builder =>
+    {
+        var today = Today;
+        var days = Days.ToList();
+        var count = Question.Options.Count;
+        calendarShown = true;
+        <div class="editor-calendar" @ref="calendarRoot">
+            <CalendarNav Month="month" MonthChanged="@(m => { month = m; calendarError = null; })" IdPrefix="@uid">
+                <table class="editor-cal-grid">
+                    <caption class="visually-hidden">@DatesFormat.MonthName(month.Year, month.Month)</caption>
+                    <thead>
+                        <tr>
+                            @for (var w = 0; w < 7; w++)
+                            {
+                                var weekday = w;
+                                var all = !DateEditing.HeaderSelects(Question.Options, DateEditing.Weekdays(month.Year, month.Month, weekday));
+                                <th scope="col">
+                                    <button type="button" class="editor-cal-wd" aria-pressed="@(all ? "true" : "false")"
+                                            aria-label="@($"Every {WeekdayLong[weekday]} in {DatesFormat.MonthName(month.Year, month.Month)}")"
+                                            @onclick="() => ToggleWeekdayAsync(weekday)">@DatesFormat.WeekdayShort[weekday]</button>
+                                </th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var week in DatesFormat.Weeks(month.Year, month.Month))
+                        {
+                            <tr>
+                                @foreach (var day in week)
+                                {
+                                    if (day is not { } date)
+                                    {
+                                        <td></td>
+                                        continue;
+                                    }
+                                    var selected = IsSelected(date);
+                                    var slots = Question.Options.Count(o => o.Date == date && o.Start is not null);
+                                    <td>
+                                        <button type="button" class="editor-cal-day @(selected ? "selected" : "") @(date == today ? "today" : "") @(date < today ? "past" : "")"
+                                                aria-pressed="@(selected ? "true" : "false")" aria-label="@DatesFormat.FullDate(date)"
+                                                data-day="@date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)"
+                                                @onclick="() => ToggleDayAsync(date)">
+                                            <span>@date.Day</span>
+                                            @if (slots > 0)
+                                            {
+                                                <span class="editor-cal-dot" aria-hidden="true">@slots</span>
+                                            }
+                                        </button>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </CalendarNav>
+            <div class="editor-cal-foot">
+                <span class="form-text mt-0" aria-hidden="true">Calendar</span>
+                <OptionHelp Label="Calendar">
+                    <p>Dragging from one day to another gives every day in between the state the first one switches to; on a
+                        touch screen, hold the first day a moment, then drag. Keyboard: the arrows move between days, Space
+                        selects, Shift with the arrows gives the days passed the state of the day where Shift went down.</p>
+                    <p>A weekday heading selects that weekday in the month shown, or deselects it when every one is selected. The
+                        month title zooms out to months, years, decades and centuries (years 1 to 9999).</p>
+                    <p>A selected day is one option for the whole day until it gets times; then each time is an option. A dates
+                        poll has at most @DatesMax options.</p>
+                </OptionHelp>
+                <span class="editor-count ms-auto @(count > DatesMax ? "editor-count-over" : "")" id="@uid-date-count"
+                      aria-label="@($"{count} of {DatesMax} options")">@count / @DatesMax</span>
+            </div>
+            @if (calendarError is not null)
+            {
+                <div class="invalid-feedback d-block" role="alert">@calendarError</div>
+            }
+        </div>
+
+        @if (days.Count == 0)
+        {
+            <p class="text-secondary small mb-2">No dates selected.</p>
+        }
+        else
+        {
+            var pages = DateEditing.PageCount(days.Count);
+            dayPage = DateEditing.ClampPage(dayPage, days.Count);
+            var errorPages = ErrorPages(days);
+            <div class="editor-days-head">
+                <span class="editor-days-count">@DateEditing.CountText(days.Count, count)</span>
+                @if (pages > 1)
+                {
+                    <nav class="editor-pager" aria-label="Day pages">
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-icon" aria-label="Previous page" title="Previous page"
+                                disabled="@(dayPage == 0)" @onclick="() => dayPage--"><Icon Name="chevron-left" /></button>
+                        @for (var p = 0; p < pages; p++)
+                        {
+                            var page = p;
+                            var current = page == dayPage;
+                            var flagged = errorPages.Contains(page);
+                            <button type="button" class="btn btn-sm editor-page @(current ? "btn-primary" : "btn-outline-secondary") @(flagged ? "editor-page-error" : "")"
+                                    aria-current="@(current ? "page" : null)" aria-label="@($"Page {page + 1}{(flagged ? ", has errors" : "")}")"
+                                    @onclick="() => dayPage = page">@(page + 1)</button>
+                        }
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-icon" aria-label="Next page" title="Next page"
+                                disabled="@(dayPage >= pages - 1)" @onclick="() => dayPage++"><Icon Name="chevron-right" /></button>
+                    </nav>
+                }
+            </div>
+            <ul class="editor-days">
+                @foreach (var g in days.Skip(dayPage * DateEditing.PageSize).Take(DateEditing.PageSize))
+                {
+                    var day = g.Key;
+                    var options = g.ToList();
+                    var inputId = $"{uid}-slot-{day:yyyyMMdd}";
+                    var errors = DayErrors(day);
+                    var slotErr = slotError.GetValueOrDefault(day);
+                    var timed = options.Where(o => o.Start is not null).ToList();
+                    var description = DayDescription(options);
+                    <li class="editor-day" @key="day">
+                        <div class="editor-day-head">
+                            <span class="fw-semibold">@DatesFormat.DayLabel(day)</span>
+                            <button type="button" class="btn btn-sm btn-link editor-day-remove" aria-label="Remove @DatesFormat.FullDate(day)" title="Remove"
+                                    @onclick="() => RemoveDayAsync(day)"><Icon Name="x" /></button>
+                        </div>
+                        <div class="editor-slots">
+                            @if (timed.Count == 0)
+                            {
+                                <span class="editor-slot editor-slot-allday">All day</span>
+                            }
+                            @foreach (var s in timed)
+                            {
+                                var slot = s;
+                                <span class="editor-slot" @key="KeyOf(slot)">
+                                    @SlotText(slot)
+                                    <button type="button" class="editor-slot-remove" aria-label="Remove @SlotText(slot) on @DatesFormat.FullDate(day)"
+                                            @onclick="() => RemoveSlotAsync(slot)"><Icon Name="x" /></button>
+                                </span>
+                            }
+                        </div>
+                        <div class="editor-slot-add">
+                            <label class="visually-hidden" for="@inputId">Time on @DatesFormat.FullDate(day)</label>
+                            <input id="@inputId" class="form-control form-control-sm editor-slot-input @(slotErr is not null ? "is-invalid" : "")" inputmode="numeric"
+                                   placeholder="19:00 or 18:30–21:00" autocomplete="off"
+                                   aria-describedby="@(slotErr is not null ? inputId + "-err" : null)" aria-invalid="@(slotErr is not null ? "true" : null)"
+                                   value="@slotInput.GetValueOrDefault(day)" @oninput="@(e => SetSlotInput(day, e.Value))"
+                                   @onkeydown="e => SlotKeyAsync(day, e)" />
+                            <ClockPicker Label="@DatesFormat.FullDate(day)" Picked="@(t => AddPickedSlotAsync(day, t.Start, t.End))" />
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => AddSlotAsync(day)">Add time</button>
+                            @if (days.Count > 1 && timed.Count > 0)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ApplyToAllAsync(day)">Apply to all selected days</button>
+                            }
+                        </div>
+                        @if (slotErr is not null)
+                        {
+                            <div class="invalid-feedback d-block" id="@inputId-err">@slotErr</div>
+                        }
+                        @if (errors.Count > 0)
+                        {
+                            <div class="invalid-feedback d-block">
+                                @foreach (var m in errors)
+                                {
+                                    <div>@m</div>
+                                }
+                            </div>
+                        }
+                        <details class="editor-details" open="@(!string.IsNullOrEmpty(description) || detailsOpen.Contains(options[0]))">
+                            <summary>Details</summary>
+                            <textarea class="form-control editor-textarea mt-1" rows="2" aria-label="Details of @DatesFormat.FullDate(day) (Markdown)"
+                                      value="@description"
+                                      @oninput="e => { detailsOpen.Add(options[0]); return SetDayDescriptionAsync(day, e.Value?.ToString()); }"></textarea>
+                        </details>
+                    </li>
+                }
+            </ul>
+        }
+    };
+}

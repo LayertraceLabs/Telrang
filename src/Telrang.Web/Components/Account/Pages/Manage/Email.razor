@@ -1,0 +1,145 @@
+@page "/Account/Manage/Email"
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using Telrang.Web.Data
+@using Telrang.Web.Features.Mail
+
+@inject UserManager<ApplicationUser> UserManager
+@inject AccountService Accounts
+@inject SettingsService Settings
+@inject IdentityRedirectManager RedirectManager
+@inject SignInManager<ApplicationUser> SignInManager
+
+<PageTitle>Email</PageTitle>
+
+<h2 class="h4">Email</h2>
+
+<StatusMessage Message="@message"/>
+<div class="row">
+    <div class="col-xl-6">
+        <form @onsubmit="OnSendEmailVerificationAsync" @formname="send-verification" id="send-verification-form" method="post">
+            <AntiforgeryToken />
+        </form>
+        <div class="mb-3">
+            <div class="fw-semibold text-break">@email</div>
+            @if (isEmailConfirmed)
+            {
+                <span class="badge text-bg-success">Verified</span>
+            }
+            else
+            {
+                <span class="badge text-bg-warning">Not verified</span>
+                @if (mailConfigured)
+                {
+                    <button type="submit" class="btn btn-link btn-sm" form="send-verification-form">Resend verification</button>
+                }
+            }
+        </div>
+        @if (mailConfigured)
+        {
+            <EditForm Model="Input" FormName="change-email" OnValidSubmit="OnValidSubmitAsync" method="post">
+                <DataAnnotationsValidator />
+                <ValidationSummary class="text-danger" role="alert" />
+                <div class="form-floating mb-3">
+                    <InputText @bind-Value="Input.NewEmail" id="Input.NewEmail" class="form-control" autocomplete="email" aria-required="true" placeholder="name@example.com" />
+                    <label for="Input.NewEmail" class="form-label">New email</label>
+                    <ValidationMessage For="() => Input.NewEmail" class="text-danger" />
+                </div>
+                <div class="form-floating mb-3">
+                    <InputText type="password" @bind-Value="Input.Secret" id="Input.Secret" class="form-control" autocomplete="current-password" aria-required="true" placeholder="password" />
+                    <label for="Input.Secret" class="form-label">Password or code</label>
+                    <ValidationMessage For="() => Input.Secret" class="text-danger" />
+                </div>
+                <button type="submit" class="w-100 btn btn-lg btn-primary">Change email</button>
+            </EditForm>
+        }
+        else
+        {
+            <p class="text-secondary">Ask an admin to change or verify your email.</p>
+        }
+    </div>
+</div>
+
+@code {
+    private string? message;
+    private ApplicationUser? user;
+    private string? email;
+    private bool isEmailConfirmed;
+    private bool mailConfigured;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "change-email")]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        mailConfigured = Settings.Current.Mail.IsConfigured;
+
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        email = await UserManager.GetEmailAsync(user);
+        isEmailConfirmed = user.EmailConfirmed;
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+        if (string.Equals(Input.NewEmail?.Trim(), email, StringComparison.OrdinalIgnoreCase))
+        {
+            message = "Error: That is your current email.";
+            return;
+        }
+
+        // Re-authentication (pentest AV-02): the email is the way back in through "forgot password".
+        if (!await Accounts.ReauthenticateAsync(user, Input.Secret))
+        {
+            (SignInManager as AppSignInManager)?.RecordFailure();
+            message = "Error: Password or code is wrong.";
+            return;
+        }
+
+        // Same answer whether or not the address is free and whether or not the outbox took the mail (a per-recipient
+        // cooldown would tell that someone else just used the address, pentest R2-ACC-3); the switch happens when the
+        // link mailed to the new address is opened.
+        var queued = await Accounts.RequestEmailChangeAsync(user, Input.NewEmail!);
+        message = queued is { Reason: MailDropReason.NotConfigured } ? "Error: " + queued.DroppedMessage : $"Confirmation link sent to {Input.NewEmail}.";
+        Input = new();
+    }
+
+    private async Task OnSendEmailVerificationAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        var queued = await Accounts.SendVerificationAsync(user);
+        message = queued?.DroppedMessage is { } dropped ? "Error: " + dropped : "Verification link sent.";
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [EmailAddress]
+        [Display(Name = "New email")]
+        public string? NewEmail { get; set; }
+
+        [Required(ErrorMessage = "Enter your password or a code from your app.")]
+        [DataType(DataType.Password)]
+        public string? Secret { get; set; }
+    }
+}

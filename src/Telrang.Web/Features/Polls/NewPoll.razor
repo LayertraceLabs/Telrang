@@ -1,0 +1,135 @@
+@page "/polls/new"
+@layout MainLayout
+@attribute [Authorize]
+@inject IOptions<AppOptions> AppOptions
+@inject PollService Polls
+@inject UserManager<ApplicationUser> Users
+@inject NavigationManager Nav
+@inject SettingsService Settings
+
+<PageTitle>New poll - @AppOptions.Value.Name</PageTitle>
+
+<PageHeader Title="@(copyOf is not null ? "Copy poll" : "New poll")" />
+@if (!verified)
+{
+    <p class="alert alert-warning" role="alert">Verify your email to create polls.
+        @if (Settings.Current.Mail.IsConfigured)
+        {
+            <a href="Account/Manage/Email" data-enhance-nav="false">Resend verification</a>
+        }
+        else
+        {
+            <span>Ask an admin to verify it.</span>
+        }
+    </p>
+}
+@if (limits is { Halved: true })
+{
+    <p class="small text-secondary">New accounts: @limits.PollsPerDay new @(limits.PollsPerDay == 1 ? "poll" : "polls") per day for the first 24 hours.</p>
+}
+
+@if (initial is not null)
+{
+    <PollEditor @ref="editor" @key="editorKey" Initial="initial" Validated="OnValidated" DefaultTimeZone="@defaultZone" BrowserTimeZone="@browserZone" DraftKey="@draftKey" ReplaceDraft="@(copyOf is not null)"
+                MaxDurationDays="@(limits?.PollDurationDays ?? 0)">
+        @if (message is not null)
+        {
+            <div class="alert alert-danger mt-3" role="alert">@message</div>
+        }
+        <div class="mt-3 d-flex gap-2">
+            <button type="button" class="btn btn-primary btn-lg" disabled="@(busy || !verified)" @onclick="CreateAsync">Create poll</button>
+            <a class="btn btn-outline-secondary btn-lg" href="polls">Cancel</a>
+        </div>
+    </PollEditor>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    /// <summary>"Copy" (DESIGN.md §20.2): the encoded id of one of the caller's polls to start from.</summary>
+    [SupplyParameterFromQuery(Name = "from")] public string? From { get; set; }
+
+    private PollDraft? initial;
+    private string? copyOf;
+    private string editorKey = "";
+    private string? message;
+    private bool busy;
+    private bool verified = true;
+    private string defaultZone = PollTime.Utc;
+    private bool browserZone;
+    private EffectiveLimits? limits;
+    private PollEditor? editor;
+    private string? draftKey;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var userId = Users.GetUserId((await AuthState).User);
+        if (userId is null) return;
+        // Everything is loaded before the editor gets its draft: the page renders while it awaits (at once on a truly
+        // async database), and the editor applies the default zone only when it first loads a draft.
+        PollDraft draft;
+        string? from = null;
+        if (!string.IsNullOrEmpty(From))
+        {
+            var copy = await Polls.GetCopyAsync(userId, From);
+            if (copy is null)
+            {
+                Nav.NotFound(); // foreign and unknown polls alike
+                return;
+            }
+            draft = copy;
+            from = From;
+        }
+        else
+        {
+            draft = new PollDraft();
+        }
+        var isVerified = await Polls.HasVerifiedEmailAsync(userId);
+        // DESIGN.md §23.5: the account's zone when set; else, for a blank poll, the browser's (set by the editor), else UTC.
+        var accountZone = await Polls.AccountTimeZoneAsync(userId);
+        var userLimits = await Polls.LimitsForAsync(userId);
+
+        verified = isVerified;
+        defaultZone = accountZone ?? PollTime.Utc;
+        browserZone = accountZone is null && from is null;
+        limits = userLimits;
+        draftKey = PollEditor.DraftKeyFor(userId, null);
+        copyOf = from;
+        editorKey = copyOf ?? "new";
+        initial = draft;
+    }
+
+    private void OnValidated(DraftResult result)
+    {
+        if (result.Success) message = null;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (editor is null) return;
+        message = null;
+        if (!editor.RevealErrors())
+        {
+            message = "Fix the marked fields.";
+            return;
+        }
+        busy = true;
+        try
+        {
+            var userId = Users.GetUserId((await AuthState).User);
+            if (userId is null) { message = "You are signed out. Sign in again."; return; }
+            var result = await Polls.CreatePollAsync(userId, editor.Current);
+            if (result.Succeeded)
+            {
+                await editor.MarkSavedAsync();
+                Nav.NavigateTo($"polls/{result.EncodedId}/share");
+                return;
+            }
+            message = result.Message ?? string.Join(" ", result.Errors.Select(e => e.Message));
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

@@ -1,0 +1,64 @@
+@inherits AdminTabBase
+
+<h2 class="visually-hidden">Log</h2>
+<div class="d-flex flex-wrap align-items-center gap-1 small text-secondary mb-2">
+    <span>Admin actions, newest first</span>
+    <OptionHelp Label="Admin log">
+        <p>@AdminLog.PageSize rows per page. Settings saves list the changed keys, never a secret's value; cleared address
+            blocks are named by kind, never by address.</p>
+        <p>The table keeps the newest @AdminLog.MaxRows.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) rows. Each action also goes to the application log,
+            without notes and poll ids, which keeps the full history wherever the server's log is stored. Read-only.</p>
+    </OptionHelp>
+</div>
+@if (rows is null)
+{
+    <p>Loading…</p>
+}
+else if (rows.Count == 0)
+{
+    <EmptyState Text="No admin actions yet." />
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm admin-table">
+            <thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Target</th><th>Note</th></tr></thead>
+            <tbody>
+                @foreach (var r in rows)
+                {
+                    <tr @key="r.Id">
+                        <td class="text-nowrap">@PollText.DateTime(r.At)</td>
+                        <td class="text-break">@(r.AdminEmail ?? r.AdminUserId)</td>
+                        <td class="text-nowrap">@r.Action</td>
+                        <td class="text-break small font-monospace">@(r.TargetType is null ? "" : r.TargetType + " " + r.TargetId)</td>
+                        <td class="text-break">@r.Note</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-sm btn-outline-secondary" disabled="@(page == 0)" @onclick="() => GoAsync(page - 1)">Newer</button>
+        <span class="small text-secondary">Page @(page + 1) of @Pages</span>
+        <button class="btn btn-sm btn-outline-secondary" disabled="@(page + 1 >= Pages)" @onclick="() => GoAsync(page + 1)">Older</button>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<AdminLogRow>? rows;
+    private int total;
+    private int page;
+
+    private int Pages => Math.Max(1, (total + AdminLog.PageSize - 1) / AdminLog.PageSize);
+
+    protected override Task OnInitializedAsync() => GoAsync(0);
+
+    private async Task GoAsync(int p)
+    {
+        var result = await WithAdminAsync((a, c) => a.ListLogAsync(c, p));
+        if (result is { } r)
+        {
+            (rows, total, page) = (r.Rows, r.Total, p);
+        }
+    }
+}

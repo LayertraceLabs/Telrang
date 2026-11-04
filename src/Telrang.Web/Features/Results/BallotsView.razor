@@ -1,0 +1,98 @@
+@* The ballots view of a ranked or points poll (DESIGN.md §33): one column per ballot, named for the viewer (BallotTable),
+   in submission order. Ranked: rows 1st, 2nd, … down to the longest ranking, each cell the option label, then a
+   "Banned" row; points: options as rows in results order, each cell the points (empty for 0). The first column is
+   sticky, the table scrolls sideways. One page of RowWindow.PageSize ballots (DESIGN.md §31); cells are plain markup.
+   Dates polls use DatesGridView. *@
+<h2 class="h5" id="@Anchor">Ballots</h2>
+@if (Table.Window.Total == 0)
+{
+    <p class="text-secondary">No responses yet.</p>
+}
+else if (Table.Ranked is { } ranked)
+{
+    var depth = ranked.Count == 0 ? 0 : ranked.Max(c => c.Ranked.Count);
+    var bans = Definition.Questions[0].MaxBans > 0 || ranked.Any(c => c.Banned.Count > 0);
+    <RowsPager Window="Table.Window" BaseHref="@BaseHref" Anchor="@Anchor" Label="Ballot pages" Noun="Ballots" />
+    <div class="table-responsive ballots-scroll">
+        <table class="table table-sm align-middle ballots-table ballots-ranked">
+            <thead>
+                <tr>
+                    <th scope="col" class="ballots-sticky">Position</th>
+                    @foreach (var c in ranked)
+                    {
+                        <th scope="col" class="ballots-name"><bdi>@c.Name</bdi></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @for (var p = 0; p < depth; p++)
+                {
+                    var position = p;
+                    <tr>
+                        <th scope="row" class="ballots-sticky">@PollText.Ordinal(position + 1)</th>
+                        @foreach (var c in ranked)
+                        {
+                            <td class="ballots-cell">@if (position < c.Ranked.Count)
+                                {
+                                    <bdi>@c.Ranked[position]</bdi>
+                                }</td>
+                        }
+                    </tr>
+                }
+                @if (bans)
+                {
+                    <tr class="ballots-banned">
+                        <th scope="row" class="ballots-sticky">Banned</th>
+                        @foreach (var c in ranked)
+                        {
+                            <td class="ballots-cell">@foreach (var b in c.Banned)
+                                {
+                                    <bdi class="d-block">@b</bdi>
+                                }</td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else if (Table.Points is { } points)
+{
+    <RowsPager Window="Table.Window" BaseHref="@BaseHref" Anchor="@Anchor" Label="Ballot pages" Noun="Ballots" />
+    <div class="table-responsive ballots-scroll">
+        <table class="table table-sm align-middle ballots-table ballots-points">
+            <thead>
+                <tr>
+                    <th scope="col" class="ballots-sticky">Option</th>
+                    @foreach (var c in points.Columns)
+                    {
+                        <th scope="col" class="ballots-name"><bdi>@c.Name</bdi></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @for (var o = 0; o < points.Options.Count; o++)
+                {
+                    var option = o;
+                    <tr>
+                        <th scope="row" class="ballots-sticky"><bdi>@points.Options[option]</bdi></th>
+                        @foreach (var c in points.Columns)
+                        {
+                            <td class="ballots-cell ballots-number">@(c.Points[option] == 0 ? "" : c.Points[option].ToString(System.Globalization.CultureInfo.InvariantCulture))</td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    public const string Anchor = "ballots";
+
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public BallotTable Table { get; set; } = default!;
+
+    /// <summary>The ballots view's address (<c>p/{id}/results?view=ballots</c>), for the pager.</summary>
+    [Parameter, EditorRequired] public string BaseHref { get; set; } = "";
+}

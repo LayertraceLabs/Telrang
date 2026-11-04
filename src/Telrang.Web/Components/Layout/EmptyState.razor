@@ -1,0 +1,10 @@
+@* "Nothing here yet" block for lists: one line and, optionally, the action that fills the list. *@
+<div class="empty-state">
+    <p class="empty-state-text">@Text</p>
+    @ChildContent
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

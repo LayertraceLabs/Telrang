@@ -1,0 +1,342 @@
+@page "/polls/{Id}/share"
+@layout MainLayout
+@attribute [Authorize]
+@inject IOptions<AppOptions> AppOptions
+@inject PollService Polls
+@inject UserManager<ApplicationUser> Users
+@inject NavigationManager Nav
+@inject SettingsService Settings
+
+<PageTitle>Share poll - @AppOptions.Value.Name</PageTitle>
+
+@if (overview is { } o)
+{
+    var a = o.Access;
+    <PageHeader Title="@a.Definition.Title" TitleClass="text-break">
+        <p class="text-secondary">
+            <a href="polls">My polls</a> · <a href="polls/@Id/edit">Edit</a> · <a href="polls/new?from=@Id">Copy poll</a> · <a href="p/@Id/results" data-enhance-nav="false">Results</a>
+            · @o.BallotCount @(o.BallotCount == 1 ? "vote" : "votes")
+        </p>
+    </PageHeader>
+    <p class="d-flex flex-wrap gap-2">
+        @* download: Blazor's router leaves these links alone (they are plain endpoints, not pages). *@
+        <a class="btn btn-sm btn-outline-primary" href="polls/@Id/results.csv" download>Download results (CSV)</a>
+        <a class="btn btn-sm btn-outline-primary" href="polls/@Id/export.csv" download>Download ballots (CSV)</a>
+    </p>
+
+    <section class="card mb-3">
+        <div class="card-body">
+            <h2 class="h5">Poll link</h2>
+            <div class="input-group">
+                <input id="public-link" class="form-control font-monospace" readonly value="@PublicLink" aria-label="Poll link" />
+                <button type="button" class="btn btn-primary" data-copy="@PublicLink" data-copy-status="public-link-status">Copy</button>
+            </div>
+            <div class="form-text" id="public-link-status" role="status"></div>
+            <p class="small mb-0 mt-2 mode-line">@PollText.ModeLine(a.Poll.VoterMode, a.Definition.Responses)</p>
+        </div>
+    </section>
+
+    <section class="card mb-3">
+        <div class="card-body">
+            <h2 class="h5">Status</h2>
+            <p class="mb-2">
+                @if (a.IsClosed)
+                {
+                    <span class="badge text-bg-secondary">Closed</span>
+                }
+                else
+                {
+                    <span class="badge badge-open">Open</span>
+                }
+                @if (a.Poll.ClosesAt is { } closes)
+                {
+                    @* Closed by its date (a.IsClosed comes from PollState with the injected clock): a later close date reopens it. *@
+                    var byDate = a.IsClosed && a.Poll.ClosedAt is null;
+                    <span class="small ms-2 close-line" title="@(byDate ? "A later close date reopens it" : a.Poll.AutoClose ? "Maximum poll duration" : null)">@(byDate ? "Closed" : "Closes") @PollTime.Format(closes, viewerZone)@(viewerZone != PollZone(a) ? $" (poll time zone {PollZone(a)})" : "")</span>
+                }
+            </p>
+            @if (a.Poll.ClosedAt is not null)
+            {
+                <button type="button" class="btn btn-outline-success" disabled="@busy" @onclick="() => SetClosedAsync(false)">Reopen poll</button>
+            }
+            else if (!a.IsClosed)
+            {
+                <button type="button" class="btn btn-outline-danger" disabled="@busy" @onclick="() => SetClosedAsync(true)">Close poll now</button>
+            }
+            @if (actionError is not null)
+            {
+                <div class="alert alert-danger mt-2 mb-0 py-2" role="alert">@actionError</div>
+            }
+            @if (Retention.DeleteOn(a.Poll.ClosedAt, a.Poll.ClosesAt, Settings.Current.RetentionDays) is { } deleteOn)
+            {
+                <p class="small text-secondary mt-2 mb-0 retention-line">Deleted on @PollTime.Format(deleteOn, viewerZone)</p>
+            }
+            <p class="small mt-3 mb-0">
+                <span class="results-line">@PollText.ResultsLine(a.Definition)</span>
+            </p>
+        </div>
+    </section>
+
+    @if (a.Poll.VoterMode == VoterMode.Invite)
+    {
+        <section class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex align-items-center gap-1 mb-2">
+                    <h2 class="h5 mb-0">Invite links</h2>
+                    <OptionHelp Label="Invite links">
+                        <p>One link per voter: whoever holds it can respond and change that response until it is revoked. Once a
+                            signed-in voter uses a link, it belongs to that account. A link is shown only when it is made.</p>
+                    </OptionHelp>
+                </div>
+                @if (inviteError is not null)
+                {
+                    <div class="alert alert-danger py-2" role="alert">@inviteError</div>
+                }
+                <div class="row g-2">
+                    <div class="col-sm-4 option-field">
+                        <label for="invite-count" class="form-label">How many</label>
+                        <OptionHelp Label="How many">
+                            <p>New links to make, one per voter. With aliases the batch is the larger of this number and the
+                                number of aliases, at most @PollService.MaxInvitesPerBatch; the site may cap the links per poll.</p>
+                        </OptionHelp>
+                        <input id="invite-count" type="number" min="0" max="@PollService.MaxInvitesPerBatch" class="form-control" @bind="inviteCount" />
+                    </div>
+                    <div class="col-sm-8 option-field">
+                        <label for="invite-aliases" class="form-label">Aliases <span class="text-secondary">(optional, one per line)</span></label>
+                        <OptionHelp Label="Aliases">
+                            <p>Your names for the new links, in order: the first alias goes to the first link. A response made
+                                with a link carries its alias from the moment it is created; <em>Edit alias</em> under Responses
+                                changes it later.</p>
+                            <p>Only you see aliases: in the invite list, the responses and the ballots CSV. Voters never do.</p>
+                        </OptionHelp>
+                        <textarea id="invite-aliases" class="form-control" rows="4" @bind="inviteAliases"></textarea>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-outline-primary mt-2" disabled="@busy" @onclick="GenerateAsync">Generate links</button>
+
+                @if (generated is { Count: > 0 })
+                {
+                    <div class="alert alert-warning mt-3 mb-2 small">Shown only once.</div>
+                    <label for="generated-links" class="form-label">New invite links</label>
+                    <textarea id="generated-links" class="form-control font-monospace small" rows="@Math.Min(12, generated.Count + 1)" readonly>@GeneratedText</textarea>
+                    <button type="button" class="btn btn-outline-primary mt-2" data-copy="@GeneratedText" data-copy-status="generated-links-status">Copy all links</button>
+                    <span class="small ms-2" id="generated-links-status" role="status"></span>
+                }
+
+                @if (invites is { Count: > 0 })
+                {
+                    <h3 class="h6 mt-4">All invites (@invites.Count(i => i.Used) of @invites.Count used)</h3>
+                    <ul class="list-group">
+                        @foreach (var i in invites)
+                        {
+                            <li class="list-group-item d-flex flex-wrap align-items-center justify-content-between gap-2" @key="i.Id">
+                                <span class="text-break">@(i.Alias ?? "(no alias)") <span class="small text-secondary">· @PollText.Date(i.CreatedAt)</span></span>
+                                <span class="d-flex align-items-center gap-2">
+                                    <span class="badge @(i.Used ? "text-bg-success" : "text-bg-light border")">@(i.Used ? "voted" : "unused")</span>
+                                    @if (!i.Used)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@busy" @onclick="() => RevokeAsync(i.Id, false)"
+                                                aria-label="Revoke invite @(i.Alias ?? "without alias") from @PollText.Date(i.CreatedAt)">Revoke</button>
+                                    }
+                                    else if (confirmRevoke != i.Id)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@busy" @onclick="() => confirmRevoke = i.Id"
+                                                aria-label="Revoke used invite @(i.Alias ?? "without alias") from @PollText.Date(i.CreatedAt)">Revoke…</button>
+                                    }
+                                </span>
+                                @if (confirmRevoke == i.Id)
+                                {
+                                    <div class="confirm-panel w-100">
+                                        <p class="small mb-2">The link stops working. Its ballot still counts.</p>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            <button type="button" class="btn btn-sm btn-danger" disabled="@busy" @onclick="() => RevokeAsync(i.Id, true)">Revoke link</button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => confirmRevoke = null">Cancel</button>
+                                        </div>
+                                    </div>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </section>
+    }
+
+    <section class="card mb-3 responses-card">
+        <div class="card-body">
+            <h2 class="h5">Responses</h2>
+            @if (responses is not { Count: > 0 })
+            {
+                <EmptyState Text="No responses yet." />
+            }
+            else
+            {
+                @* One page of RowWindow.PageSize responses (DESIGN.md §31). *@
+                var window = Telrang.Web.Features.Results.RowWindow.Of(responses.Count, responsesPage);
+                @if (window.Pages > 1)
+                {
+                    <nav class="d-flex flex-wrap align-items-center gap-2 mb-2 rows-pager" aria-label="Response pages">
+                        <span class="small text-secondary me-auto">Responses @window.First–@window.Last of @window.Total</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(window.Page == 1)" @onclick="() => responsesPage = window.Page - 1">Previous</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(window.Page == window.Pages)" @onclick="() => responsesPage = window.Page + 1">Next</button>
+                    </nav>
+                }
+                <ul class="list-group">
+                    @foreach (var r in responses.Skip(window.Range.Skip).Take(window.Range.Take))
+                    {
+                        <li class="list-group-item response-row" @key="r.Id">
+                            <div class="d-flex flex-wrap align-items-center gap-2">
+                                <span class="text-break me-auto">
+                                    <span class="fw-semibold response-shown">@(r.Shown ?? AnonymousName)</span>
+                                    @if (r.Alias is not null && r.Name is not null)
+                                    {
+                                        <span class="small text-secondary"> · entered as @r.Name</span>
+                                    }
+                                    <span class="small text-secondary"> · @PollTime.Format(r.UpdatedAt, viewerZone)</span>
+                                </span>
+                                @if (editingAlias != r.Id)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@busy" @onclick="() => StartAlias(r)"
+                                            aria-label="Edit alias of @(r.Shown ?? AnonymousName)">Edit alias</button>
+                                }
+                            </div>
+                            @if (editingAlias == r.Id)
+                            {
+                                <div class="input-group input-group-sm mt-2">
+                                    <input id="alias-@r.Id" class="form-control" maxlength="@aliasMax" aria-label="Alias" @bind="aliasDraft" />
+                                    <button type="button" class="btn btn-primary" disabled="@busy" @onclick="() => SaveAliasAsync(r.Id, aliasDraft)">Save</button>
+                                    @if (r.Alias is not null)
+                                    {
+                                        <button type="button" class="btn btn-outline-danger" disabled="@busy" @onclick="() => SaveAliasAsync(r.Id, null)">Clear</button>
+                                    }
+                                    <button type="button" class="btn btn-outline-secondary" @onclick="() => editingAlias = null">Cancel</button>
+                                </div>
+                                @if (aliasError is not null)
+                                {
+                                    <div class="text-danger small mt-1" role="alert">@aliasError</div>
+                                }
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private PollOverview? overview;
+    private string viewerZone = PollTime.Utc;
+
+    private static string PollZone(PollAccess a) => a.Definition.TimeZone ?? PollTime.Utc;
+    private IReadOnlyList<InviteSummary>? invites;
+    private IReadOnlyList<GeneratedInvite>? generated;
+    private bool busy;
+    private int inviteCount = 1;
+    private string inviteAliases = "";
+    private string? actionError, inviteError;
+    private Guid? confirmRevoke;
+    private IReadOnlyList<ResponseSummary>? responses;
+    private int responsesPage = 1;
+    private Guid? editingAlias;
+    private string? aliasDraft, aliasError;
+    private int aliasMax = BallotService.MaxNameLimit;
+
+    private const string AnonymousName = "Anonymous";
+
+    private string PublicLink => Settings.LinkBase(Nav.BaseUri) + "p/" + Id;
+
+    private string GeneratedText => generated is null ? "" : string.Join("\n",
+        generated.Select(g => (g.Alias is null ? "" : g.Alias + ": ") + PublicLink + "?t=" + g.Token));
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task<string?> UserIdAsync() => Users.GetUserId((await AuthState).User);
+
+    private async Task LoadAsync()
+    {
+        var userId = await UserIdAsync();
+        overview = userId is null ? null : await Polls.GetOverviewAsync(userId, Id);
+        if (overview is null)
+        {
+            Nav.NotFound(); // foreign and unknown polls alike: a real 404
+            return;
+        }
+        viewerZone = PollTime.ViewerZone(await Polls.AccountTimeZoneAsync(userId!), overview.Access.Definition.TimeZone);
+        invites = overview is { Access.Poll.VoterMode: VoterMode.Invite } && userId is not null
+            ? await Polls.ListInvitesAsync(userId, Id)
+            : null;
+        responses = await Polls.ListResponsesAsync(userId!, Id);
+        aliasMax = BallotService.NameLimit(Settings.Current.Limits);
+    }
+
+    private void StartAlias(ResponseSummary r)
+    {
+        editingAlias = r.Id;
+        aliasDraft = r.Alias;
+        aliasError = null;
+    }
+
+    private async Task SaveAliasAsync(Guid ballotId, string? alias)
+    {
+        busy = true;
+        try
+        {
+            if (await UserIdAsync() is not { } userId) return;
+            var (status, error) = await Polls.SetResponseAliasAsync(userId, Id, ballotId, alias);
+            if (status == AliasStatus.Invalid)
+            {
+                aliasError = error;
+                return;
+            }
+            editingAlias = null;
+            aliasError = null;
+            await LoadAsync();
+        }
+        finally { busy = false; }
+    }
+
+    private async Task SetClosedAsync(bool closed)
+    {
+        busy = true;
+        try
+        {
+            actionError = null;
+            if (await UserIdAsync() is { } userId) actionError = (await Polls.ChangeClosedAsync(userId, Id, closed)).Error;
+            await LoadAsync();
+        }
+        finally { busy = false; }
+    }
+
+    private async Task GenerateAsync()
+    {
+        busy = true;
+        try
+        {
+            if (await UserIdAsync() is not { } userId) return;
+            var aliases = inviteAliases.Split('\n');
+            var (invitesMade, error) = await Polls.GenerateInvitesCheckedAsync(userId, Id, inviteCount, aliases);
+            inviteError = error;
+            if (error is not null) return;
+            generated = invitesMade;
+            inviteAliases = "";
+            await LoadAsync();
+        }
+        finally { busy = false; }
+    }
+
+    private async Task RevokeAsync(Guid tokenId, bool used)
+    {
+        busy = true;
+        try
+        {
+            confirmRevoke = null;
+            if (await UserIdAsync() is { } userId) await Polls.RevokeInviteAsync(userId, Id, tokenId, includeUsed: used);
+            await LoadAsync();
+        }
+        finally { busy = false; }
+    }
+}

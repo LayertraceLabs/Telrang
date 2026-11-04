@@ -1,0 +1,68 @@
+@page "/my/votes"
+@layout MainLayout
+@attribute [Authorize]
+@inject IOptions<AppOptions> AppOptions
+@inject BallotService Ballots
+@inject PollService Polls
+@inject UserManager<ApplicationUser> Users
+
+<PageTitle>My votes - @AppOptions.Value.Name</PageTitle>
+
+<PageHeader Title="My votes" />
+
+@if (votes is null)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else if (votes.Count == 0)
+{
+    <EmptyState Text="No votes yet." />
+}
+else
+{
+    <div class="list-group my-votes">
+        @foreach (var v in votes)
+        {
+            <div class="list-group-item py-3" @key="v.EncodedId">
+                <div class="d-flex flex-wrap justify-content-between gap-2">
+                    @if (v.Revoked)
+                    {
+                        <span class="fw-semibold fs-5 text-break">@v.Title</span>
+                        <span class="badge text-bg-secondary align-self-start">Invitation revoked</span>
+                    }
+                    else
+                    {
+                        <a class="fw-semibold fs-5 text-break" href="p/@v.EncodedId" data-enhance-nav="false">@v.Title</a>
+                        <span class="badge @(v.IsClosed ? "text-bg-secondary" : "badge-open") align-self-start">@(v.IsClosed ? "Closed" : "Open")</span>
+                    }
+                </div>
+                <div class="small text-secondary mb-2">
+                    @PollText.TypeName(v.Type) · @v.ResponseCount @(v.ResponseCount == 1 ? "response" : "responses") · updated @PollTime.Format(v.LastUpdated, zone)
+                </div>
+                @if (!v.Revoked)
+                {
+                    <div class="d-flex flex-wrap gap-2">
+                        <a class="btn btn-sm btn-outline-primary" href="p/@v.EncodedId" data-enhance-nav="false">@(v.IsClosed ? "View ballot" : "Open ballot")</a>
+                        @if (v.ResultsLink)
+                        {
+                            <a class="btn btn-sm btn-outline-primary" href="p/@v.EncodedId/results" data-enhance-nav="false">Results</a>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    private IReadOnlyList<MyVoteSummary>? votes;
+    private string zone = PollTime.Utc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Users.GetUserId((await AuthState).User) is not { } userId) { votes = []; return; }
+        zone = await Polls.DefaultTimeZoneAsync(userId);
+        votes = await Ballots.ListMyVotesAsync(userId);
+    }
+}

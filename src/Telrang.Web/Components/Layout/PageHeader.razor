@@ -1,0 +1,19 @@
+@* Title row of a page: the h1 (focused after navigation, see Routes) and an optional actions slot on the right. *@
+<div class="page-header">
+    <div class="page-header-text">
+        <h1 class="@TitleClass">@Title</h1>
+        @ChildContent
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="page-actions">@Actions</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? TitleClass { get; set; }
+    /// <summary>Optional line(s) under the title.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

@@ -1,0 +1,17 @@
+@* Read-only list of options with their descriptions. *@
+<ul class="list-group mb-3">
+    @foreach (var o in Options)
+    {
+        <li class="list-group-item" @key="o.Key">
+            <span class="fw-semibold">@o.Label</span>
+            @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
+            {
+                <div class="poll-markdown small text-secondary mt-1">@MarkdownRenderer.Render(o.DescriptionMarkdown)</div>
+            }
+        </li>
+    }
+</ul>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<PollOption> Options { get; set; } = [];
+}

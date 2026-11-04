@@ -1,0 +1,38 @@
+@* One change log entry in words (DESIGN.md §26, §31), the same text as PollText.ChangeText. Every label is isolated in
+   <bdi>, so a right-to-left label cannot reorder the words around it. *@
+@switch (Kind)
+{
+    case OptionChangeKind.Added:
+        <text>“<bdi>@Label</bdi>” added</text>
+        break;
+    case OptionChangeKind.Removed:
+        <text>“<bdi>@Label</bdi>” removed@(BallotCount is int n ? $" (on {PollText.BallotsText(n)})" : "")</text>
+        break;
+    case OptionChangeKind.Renamed:
+        <text>“<bdi>@OldLabel</bdi>” renamed to “<bdi>@Label</bdi>”</text>
+        break;
+    case OptionChangeKind.DetailsChanged:
+        <text>Details of “<bdi>@Label</bdi>” changed</text>
+        break;
+    case OptionChangeKind.TitleChanged:
+        <text>Title changed: “<bdi>@OldLabel</bdi>” → “<bdi>@Label</bdi>”</text>
+        break;
+    case OptionChangeKind.DescriptionChanged:
+        <text>Description changed</text>
+        break;
+    case OptionChangeKind.Earlier:
+        <text>@PollText.EarlierChanges(BallotCount ?? 0)</text>
+        break;
+    default:
+        throw new ArgumentOutOfRangeException(nameof(Kind), Kind, null);
+}
+
+@code {
+    [Parameter, EditorRequired] public OptionChangeKind Kind { get; set; }
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public string? OldLabel { get; set; }
+
+    /// <summary>Removed: the ballots that answered the option, null to leave the count out (a viewer who cannot see the
+    /// results, DESIGN.md §31). Earlier: how many entries were merged.</summary>
+    [Parameter] public int? BallotCount { get; set; }
+}
