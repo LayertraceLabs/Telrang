@@ -1,0 +1,22 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{cs,razor}]
+indent_style = space
+indent_size = 4
+
+[*.cs]
+# The code keeps short members of anonymous types and object initializers on one line.
+csharp_new_line_before_members_in_anonymous_types = false
+csharp_new_line_before_members_in_object_initializers = false
+csharp_indent_case_contents_when_block = false
+
+[*.{json,yml,yaml,csproj,props,slnx}]
+indent_size = 2
+
+[**/Data/Migrations/*.cs]
+generated_code = true

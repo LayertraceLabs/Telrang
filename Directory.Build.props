@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- Overridden by scripts/publish-release.sh (-p:Version). Dev builds show v0.0.0-dev. -->
+    <Version>0.0.0-dev</Version>
+    <!-- The release stamps version+commit itself; without this the SDK appends the full hash again, and only where
+         .git exists (not in the Docker build). -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- Machine lacks the aspnet-targeting-pack distro package; the SDK then pulls
+         Microsoft.AspNetCore.App.Ref from NuGet but errors on missing prune data (NETSDK1226).
+         Harmless where the pack is installed. Proper fix: `sudo pacman -S aspnet-targeting-pack`. -->
+    <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
+  </PropertyGroup>
+</Project>

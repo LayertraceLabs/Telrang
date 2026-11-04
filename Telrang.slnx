@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Telrang.Core/Telrang.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Telrang.Core.Tests/Telrang.Core.Tests.csproj" />
+  </Folder>
+</Solution>
