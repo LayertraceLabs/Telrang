@@ -1,0 +1,27 @@
+# Weekly update PRs, one grouped PR per ecosystem. The Docker base images are pinned by digest (docker/Dockerfile);
+# Dependabot moves the digest within the 10.0 tags.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      nuget:
+        patterns: ['*']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns: ['*']

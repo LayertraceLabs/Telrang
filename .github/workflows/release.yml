@@ -1,0 +1,347 @@
+# Release on a v* tag (DESIGN.md §29): tests, the three install formats built and smoke-tested, then the image pushed to
+# GHCR and a GitHub Release with the archives, SHA256SUMS and build provenance attestations.
+# Locally the same archives come from scripts/publish-release.sh.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: '1'
+  # Pinned so a browser release cannot break a release unannounced; bump it with ci.yml.
+  FIREFOX_VERSION: '158.0.1'
+
+jobs:
+  # Build, Core and Web tests (SQLite), Web tests on PostgreSQL, format check, e2e on the framework-dependent publish.
+  ci:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  archives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - id: version
+        name: Version from the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "bad tag: $GITHUB_REF_NAME" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # The same short hash publish-release.sh stamps, so every format reports one version string.
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Linux and Windows archives
+        run: scripts/publish-release.sh "${{ steps.version.outputs.version }}" --skip-tests
+      # Exactly the three archives and SHA256SUMS, each with the tag's version stamped into Telrang.Web.dll.
+      - name: Check the archives
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          STAMP: ${{ steps.version.outputs.version }}+${{ steps.version.outputs.commit }}
+        run: |
+          cd "dist/$VERSION"
+          expected=$(printf '%s\n' SHA256SUMS "telrang-$VERSION-linux-arm64.tar.gz" "telrang-$VERSION-linux-x64.tar.gz" \
+            "telrang-$VERSION-win-x64.zip")
+          [ "$(printf '%s\n' * | sort)" = "$(printf '%s\n' "$expected" | sort)" ] || { ls -l; echo "unexpected release files" >&2; exit 1; }
+          sha256sum -c SHA256SUMS
+          for rid in linux-x64 linux-arm64; do
+            tar -xzOf "telrang-$VERSION-$rid.tar.gz" "telrang-$VERSION-$rid/Telrang.Web.dll" | grep -acF "$STAMP" >/dev/null \
+              || { echo "$rid: Telrang.Web.dll is not stamped $STAMP" >&2; exit 1; }
+            tar -tzf "telrang-$VERSION-$rid.tar.gz" | grep -cx "telrang-$VERSION-$rid/telrang.service" >/dev/null
+          done
+          unzip -p "telrang-$VERSION-win-x64.zip" "telrang-$VERSION-win-x64/Telrang.Web.dll" | grep -acF "$STAMP" >/dev/null \
+            || { echo "win-x64: Telrang.Web.dll is not stamped $STAMP" >&2; exit 1; }
+          unzip -l "telrang-$VERSION-win-x64.zip" | grep -cF "telrang-$VERSION-win-x64/Telrang.Web.exe" >/dev/null
+          ls -l
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: dist/${{ steps.version.outputs.version }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The tarball installed as docs/deploy/linux.md says, under the runner's systemd; then e2e on that build.
+  smoke-linux:
+    needs: archives
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.archives.outputs.version }}
+      COMMIT: ${{ needs.archives.outputs.commit }}
+      E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: release
+      - name: Checksums
+        run: cd release && sha256sum -c SHA256SUMS
+      - name: Install as a systemd service
+        run: |
+          sudo mkdir -p /opt/telrang
+          sudo tar -xzf "release/telrang-$VERSION-linux-x64.tar.gz" -C /opt/telrang --strip-components=1 --no-same-owner
+          sudo useradd --system --user-group --no-create-home --home-dir /var/lib/telrang --shell /usr/sbin/nologin telrang
+          sudo install -d -m 750 -o root -g telrang /etc/telrang
+          sudo install -m 640 -o root -g telrang /opt/telrang/telrang.json /etc/telrang/telrang.json
+          sudo install -m 644 /opt/telrang/telrang.service /etc/systemd/system/telrang.service
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now telrang
+      - name: Health check
+        run: |
+          for _ in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          systemctl is-active telrang
+          /opt/telrang/Telrang.Web healthcheck
+          sudo journalctl -u telrang --no-pager | grep -c "Admin setup key issued" >/dev/null
+          sudo test -s /var/lib/telrang/admin-key.txt
+          if sudo journalctl -u telrang --no-pager | grep -F "Admin setup key:"; then echo "the setup key reached the journal" >&2; exit 1; fi
+          sudo stat -c '%U:%G %a %n' /var/lib/telrang /var/lib/telrang/keys /etc/telrang/telrang.json
+          if sudo journalctl -u telrang --no-pager | grep -E "open to other users|readable or writable by other users"; then exit 1; fi
+          systemd-analyze security telrang --no-pager | tail -1
+      - name: Version on the page
+        run: curl -fsS http://127.0.0.1:8080/ | grep -F "title=\"$VERSION&#x2B;$COMMIT\">v$VERSION<"
+      - name: Stop and remove
+        run: |
+          sudo systemctl disable --now telrang
+          sudo journalctl -u telrang --no-pager | tail -20
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install Firefox ${{ env.FIREFOX_VERSION }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/firefox.tar" \
+            "https://download.mozilla.org/?product=firefox-${FIREFOX_VERSION}-ssl&os=linux64&lang=en-US"
+          tar -xf "$RUNNER_TEMP/firefox.tar" -C "$RUNNER_TEMP"
+          echo "FIREFOX=$RUNNER_TEMP/firefox/firefox" >> "$GITHUB_ENV"
+      - name: Browser smoke tests on the self-contained build
+        run: scripts/e2e.sh --app /opt/telrang/Telrang.Web
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-artifacts-linux
+          path: ${{ env.E2E_ARTIFACTS }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The zip installed with install-service.ps1, health check, uninstalled again.
+  smoke-windows:
+    needs: archives
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions: {}
+    env:
+      VERSION: ${{ needs.archives.outputs.version }}
+      STAMP: ${{ needs.archives.outputs.version }}+${{ needs.archives.outputs.commit }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: release
+      - name: Install the service
+        shell: pwsh
+        run: |
+          Expand-Archive -Path "release/telrang-$env:VERSION-win-x64.zip" -DestinationPath "$env:RUNNER_TEMP"
+          & "$env:RUNNER_TEMP/telrang-$env:VERSION-win-x64/install-service.ps1"
+      - name: Health check
+        shell: pwsh
+        run: |
+          $ok = $false
+          foreach ($i in 1..60) {
+            try { if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/healthz).StatusCode -eq 200) { $ok = $true; break } } catch { }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $ok) { Get-EventLog -LogName Application -Source Telrang -Newest 20 | Format-List; throw 'no /healthz answer' }
+          $svc = Get-CimInstance Win32_Service -Filter "Name='Telrang'"
+          $svc | Format-List Name, State, StartMode, DelayedAutoStart, StartName, PathName
+          if ($svc.StartName -ne 'NT SERVICE\Telrang') { throw "runs as $($svc.StartName)" }
+          & 'C:\Program Files\Telrang\Telrang.Web.exe' healthcheck
+          if ($LASTEXITCODE -ne 0) { throw 'healthcheck command failed' }
+          $page = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/).Content
+          if (-not $page.Contains("title=""$($env:STAMP.Replace('+', '&#x2B;'))"">v$env:VERSION<")) { throw "the page does not show $env:STAMP" }
+          if (-not (Test-Path 'C:\ProgramData\Telrang\data\admin-key.txt')) { throw 'no admin-key.txt' }
+          $events = Get-EventLog -LogName Application -Source Telrang -ErrorAction SilentlyContinue
+          if ($events | Where-Object { $_.Message -match 'Admin setup key:' }) { throw 'the setup key reached the Event Log' }
+          (Get-Acl 'C:\ProgramData\Telrang\data').Access | Format-Table IdentityReference, FileSystemRights, IsInherited
+          $others = (Get-Acl 'C:\ProgramData\Telrang\data').Access | Where-Object {
+            $_.IdentityReference.Value -notin @('NT AUTHORITY\SYSTEM', 'BUILTIN\Administrators', 'NT SERVICE\Telrang') }
+          if ($others) { throw 'the data folder is open to others' }
+          Get-ChildItem 'C:\ProgramData\Telrang\data\keys' | ForEach-Object {
+            if (-not (Select-String -Path $_.FullName -Pattern 'encryptedSecret' -Quiet)) { throw "$($_.Name) is not DPAPI-protected" } }
+      - name: Uninstall
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/telrang-$env:VERSION-win-x64/uninstall-service.ps1" -RemoveProgram
+          if (Get-Service -Name Telrang -ErrorAction SilentlyContinue) { throw 'service still there' }
+          if (-not (Test-Path 'C:\ProgramData\Telrang\data\app.db')) { throw 'data was removed' }
+
+  # The image for both architectures, built once and pushed under a CI tag; the amd64 one is pulled back by digest and
+  # tested (HEALTHCHECK, e2e). publish-image tags exactly that digest (pentest R3-DEP-12e: the shipped image is the
+  # tested one, byte for byte).
+  docker:
+    needs: archives
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
+      VERSION: ${{ needs.archives.outputs.version }}
+      COMMIT: ${{ needs.archives.outputs.commit }}
+    outputs:
+      name: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: image
+        name: Image name (GHCR wants lower case)
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telrang" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        name: Build both architectures and push under the CI tag
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            COMMIT=${{ env.COMMIT }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: ${{ steps.image.outputs.name }}:ci-${{ github.sha }}
+      - name: Pull the pushed linux/amd64 image by digest
+        env:
+          NAME: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --platform linux/amd64 "$NAME@$DIGEST"
+          docker tag "$NAME@$DIGEST" telrang:ci
+      - name: Image health check
+        run: |
+          [ "$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' telrang:ci)" = "$VERSION" ]
+          docker run -d --name telrang-smoke -p 127.0.0.1:8080:8080 telrang:ci
+          for _ in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' telrang-smoke)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          docker logs telrang-smoke
+          [ "$status" = healthy ]
+          curl -fsS http://127.0.0.1:8080/ | grep -F "title=\"$VERSION&#x2B;$COMMIT\">v$VERSION<"
+          docker exec telrang-smoke stat -c '%U %a %n' /data /data/keys
+          docker rm -f telrang-smoke
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install Firefox ${{ env.FIREFOX_VERSION }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/firefox.tar" \
+            "https://download.mozilla.org/?product=firefox-${FIREFOX_VERSION}-ssl&os=linux64&lang=en-US"
+          tar -xf "$RUNNER_TEMP/firefox.tar" -C "$RUNNER_TEMP"
+          echo "FIREFOX=$RUNNER_TEMP/firefox/firefox" >> "$GITHUB_ENV"
+      - name: Browser smoke tests on the image
+        run: scripts/e2e.sh --image telrang:ci
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-artifacts-docker
+          path: ${{ env.E2E_ARTIFACTS }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+  publish-image:
+    needs: [ci, archives, smoke-linux, smoke-windows, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.archives.outputs.version }}
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # No rebuild: the version tags point at the digest the docker job tested. A pre-release (1.2.0-rc.1) does not move
+      # :latest.
+      - name: Tag the tested image
+        env:
+          NAME: ${{ needs.docker.outputs.name }}
+          DIGEST: ${{ needs.docker.outputs.digest }}
+        run: |
+          tags=(-t "$NAME:$VERSION")
+          case "$VERSION" in *-*) ;; *) tags+=(-t "$NAME:latest") ;; esac
+          docker buildx imagetools create "${tags[@]}" "$NAME@$DIGEST"
+          docker buildx imagetools inspect "$NAME:$VERSION" | grep -F "$DIGEST"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ needs.docker.outputs.name }}
+          subject-digest: ${{ needs.docker.outputs.digest }}
+          push-to-registry: true
+
+  github-release:
+    needs: [archives, publish-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.archives.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: release
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: release/SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag $prerelease \
+            --title "Telrang $VERSION" \
+            --notes "Install: docs/deploy/ (docker.md, linux.md, windows.md). Image: ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telrang:$VERSION. Verify a download: sha256sum -c SHA256SUMS; gh attestation verify <file> --repo $GITHUB_REPOSITORY" \
+            release/*.tar.gz release/*.zip release/SHA256SUMS
