@@ -262,7 +262,11 @@ builder.Services.AddSingleton<LiveStreamLimiter>(); // open streams per client, 
 // ---- Edge: body limits, proxy, rate limits, health ---------------------------------------------
 // Small bodies and forms for every request (DESIGN.md §31); FormLimitMiddleware gives /_blazor its own limit and enforces
 // both on servers other than Kestrel.
-builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = RequestLimits.MaxBodyBytes);
+builder.WebHost.ConfigureKestrel(o =>
+{
+    o.Limits.MaxRequestBodySize = RequestLimits.MaxBodyBytes;
+    o.AddServerHeader = false; // no "Server: Kestrel"
+});
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(RequestLimits.Apply);
 builder.Services.AddHsts(o => o.MaxAge = TimeSpan.FromDays(365));
 builder.Services.AddAppForwardedHeaders(config);

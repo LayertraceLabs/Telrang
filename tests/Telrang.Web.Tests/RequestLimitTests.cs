@@ -208,6 +208,28 @@ public class RequestLimitTests
             var buffer = new byte[256];
             var read = await stream.ReadAsync(buffer, timeout.Token);
             Assert.StartsWith("HTTP/1.1 413", Encoding.ASCII.GetString(buffer, 0, read));
+
+            using var http = new HttpClient();
+            var page = await http.GetAsync($"http://127.0.0.1:{port}/healthz");
+            Assert.False(page.Headers.Contains("Server"));
         });
+    }
+
+    [Fact]
+    public async Task The_sign_in_limit_counts_an_ipv6_48_as_one_client()
+    {
+        await using var factory = new AppFactory(new Dictionary<string, string?>
+        {
+            ["RateLimiting:AuthPermitPerMinute"] = "2",
+            ["RateLimiting:SetupPermitPerMinute"] = "1",
+        }, AddFakePeer);
+        var empty = new FormUrlEncodedContent(new Dictionary<string, string>());
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, (await Peer(factory.CreateBrowser(), "2001:db8:7:1::5").PostAsync("/Account/Login", empty)).StatusCode);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, (await Peer(factory.CreateBrowser(), "2001:db8:7:2::5").PostAsync("/Account/ForgotPassword", empty)).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await Peer(factory.CreateBrowser(), "2001:db8:7:3::5").PostAsync("/Account/Login", empty)).StatusCode);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, (await Peer(factory.CreateBrowser(), "2001:db8:8:1::5").PostAsync("/Account/Login", empty)).StatusCode);
+
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, (await Peer(factory.CreateBrowser(), "2001:db8:9:1::5").PostAsync("/setup", empty)).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await Peer(factory.CreateBrowser(), "2001:db8:9:2::5").PostAsync("/setup", empty)).StatusCode);
     }
 }

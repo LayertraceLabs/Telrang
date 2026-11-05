@@ -75,17 +75,18 @@ public static class RateLimiting
 
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
             {
-                // Per IPv6 /48 like the abuse tracker (pentest R2-VOTE-1): a /64 each would let one /48 multiply the limit.
+                // Every partition per IPv6 /48 like the abuse tracker (pentest R2-VOTE-1): a /64 each would let one /48
+                // multiply the limit.
                 if (IsVotePost(ctx)) return SlidingWindow("vote:" + ClientKeys.ForAbuse(ctx), votePerMinute);
-                if (IsSetupPost(ctx)) return SlidingWindow("setup:" + ClientKey(ctx), setupPerMinute);
-                if (IsAuthPost(ctx)) return SlidingWindow("auth:" + ClientKey(ctx), authPerMinute);
+                if (IsSetupPost(ctx)) return SlidingWindow("setup:" + ClientKeys.ForAbuse(ctx), setupPerMinute);
+                if (IsAuthPost(ctx)) return SlidingWindow("auth:" + ClientKeys.ForAbuse(ctx), authPerMinute);
                 if (pageGetsPerMinute > 0 && IsPageGet(ctx)) return SlidingWindow("get:" + ClientKeys.ForAbuse(ctx), pageGetsPerMinute);
                 if (otherPostsPerMinute > 0 && IsOtherPost(ctx)) return SlidingWindow("post:" + ClientKeys.ForAbuse(ctx), otherPostsPerMinute);
                 return RateLimitPartition.GetNoLimiter("unlimited");
             });
 
             options.AddPolicy(BackupPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
-                "backup:" + (ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? ClientKey(ctx)),
+                "backup:" + (ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? ClientKeys.ForAbuse(ctx)),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 1, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
         });
 
@@ -132,10 +133,6 @@ public static class RateLimiting
 
     /// <summary>Every POST under <c>/p/</c> (the vote page's forms).</summary>
     internal static bool IsVotePost(HttpContext ctx) => HttpMethods.IsPost(ctx.Request.Method) && ctx.Request.Path.StartsWithSegments("/p");
-
-    // RemoteIpAddress is the real client once UseForwardedHeaders has run. IPv6 clients usually
-    // own a whole /64 (often a /56 or /48), so they are bucketed per prefix rather than per address.
-    internal static string ClientKey(HttpContext ctx, int ipv6PrefixBytes = 8) => ClientKeys.For(ctx.Connection.RemoteIpAddress, ipv6PrefixBytes);
 
     private static RateLimitPartition<string> SlidingWindow(string key, int permitPerMinute) =>
         RateLimitPartition.GetSlidingWindowLimiter(key, _ => new SlidingWindowRateLimiterOptions

@@ -73,8 +73,8 @@ as the service, so run them as the service account.
 | `ConnectionStrings__Default_FILE` | unset | Path of a file holding the connection string (Docker secret); wins over `ConnectionStrings__Default`. A missing or empty file stops startup (exit code 2) |
 | `ReverseProxy__KnownProxies` / `ReverseProxy__KnownNetworks` | empty (= Unix socket peers only; in a container also the container's own networks; loopback only when listed) | Comma-separated IPs / CIDRs allowed to send `X-Forwarded-*`; replaces the default list. See "Forwarded headers trust" |
 | `ReverseProxy__TrustAll` | `false` | `true` = accept `X-Forwarded-*` from any address (only if your proxy has a public address and the app is unreachable except through it) |
-| `RateLimiting__AuthPermitPerMinute` | `10` | Login/register/2FA/reset/setup-link/passkey-options POSTs per client IP per minute |
-| `RateLimiting__SetupPermitPerMinute` | `5` | `/setup` (admin bootstrap) POSTs per client IP per minute |
+| `RateLimiting__AuthPermitPerMinute` | `10` | Login/register/2FA/reset/setup-link/passkey-options POSTs per client IP (IPv6: per /48) per minute |
+| `RateLimiting__SetupPermitPerMinute` | `5` | `/setup` (admin bootstrap) POSTs per client IP (IPv6: per /48) per minute |
 | `RateLimiting__VotePermitPerMinute` | `120` | Vote page (`/p/...`) POSTs per client IP (IPv6: per /48) per minute, sized for a class or office behind one address; refusals are not abuse signals |
 | `RateLimiting__OtherPostsPerMinute` | `120` | Every other POST (account pages, sign-out, posts to unknown paths; not the Blazor connection) per client IP (IPv6: per /48) per minute; `0` = off; refusals are not abuse signals |
 | `RateLimiting__CircuitsPerAccount` | `20` | Open Blazor connections (browser tabs) per signed-in account; one more is refused |
