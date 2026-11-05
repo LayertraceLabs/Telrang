@@ -95,17 +95,18 @@ public static class RateLimiting
     private static readonly string[] UncountedPrefixes = ["/_blazor", "/_framework", "/_content", "/branding", "/healthz"];
 
     /// <summary>
-    /// A GET or HEAD of a page (DESIGN.md §31): not a static file (a last path segment with a dot), not branding, Blazor
-    /// or the health check. The CSV downloads count as pages.
+    /// A GET or HEAD of a page (DESIGN.md §31): anything but the endpoints marked <see cref="AbuseExemptAttribute"/>
+    /// (static files that exist, branding, health) and the Blazor paths. Decided by the matched endpoint, not by a dot in
+    /// the path, so a missing file or <c>/anything.x</c> (the full "Not found" page) counts. The CSV downloads count as
+    /// pages. A status page re-execution is not counted again.
     /// </summary>
     internal static bool IsPageGet(HttpContext ctx)
     {
         if (!HttpMethods.IsGet(ctx.Request.Method) && !HttpMethods.IsHead(ctx.Request.Method)) return false;
+        if (ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodeReExecuteFeature>() is not null) return false;
         var path = ctx.Request.Path;
         foreach (var prefix in UncountedPrefixes) if (path.StartsWithSegments(prefix)) return false;
-        var value = path.Value ?? "/";
-        var last = value[(value.LastIndexOf('/') + 1)..];
-        return !last.Contains('.', StringComparison.Ordinal) || last.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
+        return ctx.GetEndpoint()?.Metadata.GetMetadata<AbuseExemptAttribute>() is null;
     }
 
     /// <summary>
