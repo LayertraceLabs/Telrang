@@ -97,10 +97,16 @@ public sealed class MailSender(
             var password = settings.GetMailPassword();
             foreach (var message in due)
             {
+                // Claimed before it is sent: SendAfter moves past ClaimTimeout and is saved first. A message whose outcome
+                // cannot be saved after the send (shutdown, database locked or full, connection lost) is then not sent
+                // again on the next pass but only once the claim runs out: at least once, never every 10 s. When the
+                // claim itself cannot be saved, nothing is sent.
+                message.SendAfter = time.GetUtcNow() + ClaimTimeout;
+                if (!await TrySaveAsync(db, message, ct)) break;
                 try
                 {
-                    // Recipient and bodies are stored encrypted (DESIGN.md §30, pentest R3-DEP-6). Unreadable ones (key ring
-                    // lost) cannot be sent: the attempt fails and the message dead-letters like any other failure.
+                    // Recipient and bodies are stored encrypted (DESIGN.md §30). Unreadable ones (key ring lost) cannot be
+                    // sent: the attempt fails and the message dead-letters like any other failure.
                     var to = emails.Reveal(message.To);
                     var text = emails.RevealBody(message.TextBody ?? "");
                     var html = message.HtmlBody is null ? null : emails.RevealBody(message.HtmlBody) ?? throw new UnreadableMailException();
@@ -129,13 +135,35 @@ public sealed class MailSender(
                         logger.LogInformation("Mail {Id} ({Type}) failed, attempt {Attempts}: {Error}", message.Id, message.Type, message.Attempts, message.LastError);
                     }
                 }
-                await db.SaveChangesAsync(ct);
+                // The outcome is saved even while the host stops: the mail has gone (or failed) either way.
+                if (!await TrySaveAsync(db, message, CancellationToken.None)) break;
             }
             return sent;
         }
         finally
         {
             running.Release();
+        }
+    }
+
+    /// <summary>
+    /// How long a claimed message is held back before another pass may send it: longer than one SMTP send can take. Only a
+    /// message whose outcome could not be saved after the send waits this long.
+    /// </summary>
+    public static readonly TimeSpan ClaimTimeout = TimeSpan.FromMinutes(15);
+
+    /// <summary>Saves <paramref name="message"/>'s changes; on a database error logs it and ends the pass (false).</summary>
+    private async Task<bool> TrySaveAsync(ApplicationDbContext db, OutboxMessage message, CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (Exception e) when (e is DbUpdateException || DatabaseErrors.IsDatabaseError(e))
+        {
+            logger.LogWarning("Mail {Id} ({Type}): saving the outbox failed ({Error}); the pass stops.", message.Id, message.Type, DatabaseErrors.Describe(e));
+            return false;
         }
     }
 

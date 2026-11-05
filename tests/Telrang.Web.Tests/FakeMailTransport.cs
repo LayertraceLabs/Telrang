@@ -11,6 +11,9 @@ public sealed partial class FakeMailTransport : IMailTransport
 
     public bool Fail { get; set; }
 
+    /// <summary>Runs after a send has been recorded (e.g. to make the database fail before the sender saves).</summary>
+    public Action<OutgoingMail>? AfterSend { get; set; }
+
     public IReadOnlyList<OutgoingMail> Sent
     {
         get { lock (sent) return sent.ToList(); }
@@ -20,6 +23,7 @@ public sealed partial class FakeMailTransport : IMailTransport
     {
         if (Fail) throw new InvalidOperationException("SMTP is down (fake).");
         lock (sent) sent.Add(mail);
+        AfterSend?.Invoke(mail);
         return Task.CompletedTask;
     }
 
