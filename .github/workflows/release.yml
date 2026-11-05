@@ -98,11 +98,14 @@ jobs:
           path: release
       - name: Checksums
         run: cd release && sha256sum -c SHA256SUMS
+      # As docs/deploy/linux.md ("Install"): the service listens on its Unix socket (/run/telrang/telrang.sock, group
+      # telrang-proxy), not on TCP, so every probe goes through the socket.
       - name: Install as a systemd service
         run: |
           sudo mkdir -p /opt/telrang
           sudo tar -xzf "release/telrang-$VERSION-linux-x64.tar.gz" -C /opt/telrang --strip-components=1 --no-same-owner
           sudo useradd --system --user-group --no-create-home --home-dir /var/lib/telrang --shell /usr/sbin/nologin telrang
+          sudo groupadd --system telrang-proxy
           sudo install -d -m 750 -o root -g telrang /etc/telrang
           sudo install -m 640 -o root -g telrang /opt/telrang/telrang.json /etc/telrang/telrang.json
           sudo install -m 644 /opt/telrang/telrang.service /etc/systemd/system/telrang.service
@@ -110,9 +113,14 @@ jobs:
           sudo systemctl enable --now telrang
       - name: Health check
         run: |
-          for _ in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          for _ in $(seq 1 60); do
+            sudo curl -fsS --unix-socket /run/telrang/telrang.sock http://localhost/healthz && break
+            sleep 1
+          done
           systemctl is-active telrang
-          /opt/telrang/Telrang.Web healthcheck
+          sudo /opt/telrang/Telrang.Web healthcheck --url http://unix:/run/telrang/telrang.sock
+          sudo stat -c '%U:%G %a %n' /run/telrang /run/telrang/telrang.sock
+          [ "$(sudo stat -c '%G %a' /run/telrang/telrang.sock)" = "telrang-proxy 660" ]
           sudo journalctl -u telrang --no-pager | grep -c "Admin setup key issued" >/dev/null
           sudo test -s /var/lib/telrang/admin-key.txt
           if sudo journalctl -u telrang --no-pager | grep -F "Admin setup key:"; then echo "the setup key reached the journal" >&2; exit 1; fi
@@ -120,11 +128,15 @@ jobs:
           if sudo journalctl -u telrang --no-pager | grep -E "open to other users|readable or writable by other users"; then exit 1; fi
           systemd-analyze security telrang --no-pager | tail -1
       - name: Version on the page
-        run: curl -fsS http://127.0.0.1:8080/ | grep -F "title=\"$VERSION&#x2B;$COMMIT\">v$VERSION<"
-      - name: Stop and remove
         run: |
-          sudo systemctl disable --now telrang
-          sudo journalctl -u telrang --no-pager | tail -20
+          sudo curl -fsS --unix-socket /run/telrang/telrang.sock http://localhost/ \
+            | grep -F "title=\"$VERSION&#x2B;$COMMIT\">v$VERSION<"
+      - name: Stop and remove
+        if: always()
+        run: |
+          sudo systemctl status telrang --no-pager || true
+          sudo systemctl disable --now telrang || true
+          sudo journalctl -u telrang --no-pager | tail -40
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x

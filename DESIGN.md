@@ -1514,6 +1514,10 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
 - 2026-11-05 (first CI runs): private-repo runners have 2 cores, so the heavy-GET total (2 × cores, at least 4) equals
   the per-client limit there; the limiter test pins the total. The e2e harness's `click` now also lets the current page
   finish loading first (as `goto` did): one run reported a page left mid-load as module integrity failures on plain HTTP.
+  First release run (v0.3.0-rc.1, not published): `smoke-linux` still installed the pre-§31 way (no `telrang-proxy`
+  group, probes on TCP 8080); it now follows docs/deploy/linux.md and probes through the Unix socket, and prints the
+  journal on failure. The e2e `formAge` counts from the response's first byte, not navigation start (a slow cold first
+  response made the setup form "too fast").
 
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
