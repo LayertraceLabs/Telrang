@@ -61,9 +61,6 @@ public readonly record struct Oklch(double L, double C, double H)
 
     public Oklch WithL(double l) => this with { L = Math.Clamp(l, 0, 1) };
 
-    /// <summary>At most <paramref name="max"/> chroma.</summary>
-    public Oklch CapC(double max) => this with { C = Math.Min(C, max) };
-
     public Rgb ToRgb()
     {
         var c = C;

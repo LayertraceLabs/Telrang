@@ -198,4 +198,16 @@ public class AuthSessionTests
         Assert.Single(await SessionsAsync(factory));
         Assert.True(await SignedInAsync(factory, cookie) ^ await SignedInAsync(factory, other));
     }
+
+    [Fact]
+    public void The_cookie_handler_field_the_session_handler_reflects_on_exists()
+    {
+        // SessionCookieHandler reads and clears CookieAuthenticationHandler's private session key. A framework update that
+        // renames it should fail here by name, not as a type initializer error on the first sign-in.
+        var field = typeof(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationHandler).GetField("_sessionKey",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.True(field is not null, "CookieAuthenticationHandler has no private _sessionKey field any more: update SessionCookieHandler.");
+        Assert.Equal(typeof(string), field.FieldType);
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(SessionCookieHandler).TypeHandle);
+    }
 }

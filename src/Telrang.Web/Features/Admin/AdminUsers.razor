@@ -270,8 +270,11 @@ else
     private async Task OnSearchInput(ChangeEventArgs e)
     {
         query = e.Value?.ToString();
-        searchCts?.Cancel();
+        var previous = searchCts;
         var cts = searchCts = new CancellationTokenSource();
+        // The previous keystroke's wait ends; it only reads IsCancellationRequested afterwards, which a disposed source allows.
+        previous?.Cancel();
+        previous?.Dispose();
         try
         {
             await Task.Delay(300, cts.Token);

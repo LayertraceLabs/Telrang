@@ -79,20 +79,6 @@ public static class PollText
         _ => n.ToString(CultureInfo.InvariantCulture) + " ballots",
     };
 
-    public static string VotersName(VoterMode v) => v switch
-    {
-        VoterMode.Public => "anyone with the link",
-        VoterMode.Accounts => "signed-in users with a verified email",
-        VoterMode.Invite => "personal invite links only",
-        _ => v.ToString(),
-    };
-
-    public static string ResponsesName(ResponsePolicy r) => r switch
-    {
-        ResponsePolicy.Many => "several per voter, each with its own name",
-        _ => "one per voter, editable until close",
-    };
-
     /// <summary>Share page: who can respond, in one line.</summary>
     public static string ModeLine(VoterMode voters, ResponsePolicy responses)
     {
