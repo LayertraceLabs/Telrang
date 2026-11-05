@@ -259,7 +259,11 @@ builder.Services.AddSingleton<ChangeLogLimiter>(); // saves that add to a change
 builder.Services.AddSingleton<HeavyGetLimiter>(); // results page and CSVs at once, per client and in all (DESIGN.md §31)
 builder.Services.AddSingleton<LiveStreamLimiter>(); // open streams per client, per account and in all
 
-// ---- Edge: proxy, rate limits, health ---------------------------------------------------------
+// ---- Edge: body limits, proxy, rate limits, health ---------------------------------------------
+// Small bodies and forms for every request (DESIGN.md §31); FormLimitMiddleware gives /_blazor its own limit and enforces
+// both on servers other than Kestrel.
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = RequestLimits.MaxBodyBytes);
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(RequestLimits.Apply);
 builder.Services.AddHsts(o => o.MaxAge = TimeSpan.FromDays(365));
 builder.Services.AddAppForwardedHeaders(config);
 builder.Services.AddAppRateLimiting(config);
@@ -345,7 +349,7 @@ app.UseRateLimiter();
 app.UseMiddleware<HeavyGetMiddleware>(); // results page and CSVs: per-client and total concurrency (DESIGN.md §31)
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseMiddleware<FormLimitMiddleware>(); // a form over the endpoint's limits: 413 / 400 page, not a 500 (DESIGN.md §21.1)
+app.UseMiddleware<FormLimitMiddleware>(); // a body or form over the limits: 413 / 400 page, not a 500 (DESIGN.md §21.1, §31)
 app.UseAntiforgery();
 app.UseMiddleware<AntiforgeryFailureMiddleware>();
 app.UseMiddleware<FormGuardMiddleware>();

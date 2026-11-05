@@ -76,6 +76,7 @@ as the service, so run them as the service account.
 | `RateLimiting__AuthPermitPerMinute` | `10` | Login/register/2FA/reset/setup-link/passkey-options POSTs per client IP per minute |
 | `RateLimiting__SetupPermitPerMinute` | `5` | `/setup` (admin bootstrap) POSTs per client IP per minute |
 | `RateLimiting__VotePermitPerMinute` | `120` | Vote page (`/p/...`) POSTs per client IP (IPv6: per /48) per minute, sized for a class or office behind one address; refusals are not abuse signals |
+| `RateLimiting__OtherPostsPerMinute` | `120` | Every other POST (account pages, sign-out, posts to unknown paths; not the Blazor connection) per client IP (IPv6: per /48) per minute; `0` = off; refusals are not abuse signals |
 | `RateLimiting__CircuitsPerAccount` | `20` | Open Blazor connections (browser tabs) per signed-in account; one more is refused |
 | `RateLimiting__CircuitsPerClient` | `60` | Open Blazor connections per client IP (IPv6: per /48), all accounts and anonymous visitors behind it together; one more is refused |
 | `RateLimiting__StreamsPerClient` | `10` | Open live results streams (owner's results tabs) per client IP (IPv6: per /48); one more gets 429 |

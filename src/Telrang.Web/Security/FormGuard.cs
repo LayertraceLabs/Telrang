@@ -117,14 +117,23 @@ public static class AbuseExemptExtensions
 
 /// <summary>
 /// Turns a failed antiforgery check (e.g. a form restored after a browser restart: the antiforgery
-/// cookie is a session cookie) into the static "Form expired" page instead of a raw 400.
+/// cookie is a session cookie) into the static "Form expired" page instead of a raw 400, and records
+/// <see cref="AbuseSignal.Antiforgery"/> (weight 1: a restored form is legitimate now and then). Not for vote posts, like
+/// their rate limit: a class behind one address must not get blocked.
 /// </summary>
 public sealed class AntiforgeryFailureMiddleware(RequestDelegate next)
 {
     public Task InvokeAsync(HttpContext http)
     {
         if (http.Features.Get<Microsoft.AspNetCore.Antiforgery.IAntiforgeryValidationFeature>() is { IsValid: false })
+        {
+            if (!RateLimiting.IsVotePost(http))
+            {
+                http.RequestServices.GetService<AbuseTracker>()?.Record(ClientKeys.ForAbuse(http),
+                    http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, AbuseSignal.Antiforgery);
+            }
             return StaticPages.FormExpiredAsync(http);
+        }
         return next(http);
     }
 }

@@ -30,7 +30,7 @@ public sealed class AbuseOptions
 /// <summary>Things that count towards a temporary block.</summary>
 /// <remarks><see cref="CircuitOutOfMemory"/>: an interactive event ran the process out of memory (DESIGN.md §31, pentest
 /// R3-RES-7b), recorded against the circuit's client key and account.</remarks>
-public enum AbuseSignal { FailedLogin, RateLimited, Honeypot, FormTimestamp, LimitRefused, Captcha, CircuitOutOfMemory }
+public enum AbuseSignal { FailedLogin, RateLimited, Honeypot, FormTimestamp, LimitRefused, Captcha, CircuitOutOfMemory, FormTooLarge, Antiforgery }
 
 public enum AbuseKind { Ip, Account }
 
@@ -75,7 +75,8 @@ public sealed class AbuseTracker(TimeProvider time, IOptions<AbuseOptions> optio
     public static int Weight(AbuseSignal signal) => signal switch
     {
         AbuseSignal.Honeypot => 10,
-        AbuseSignal.FormTimestamp or AbuseSignal.Captcha => 2,
+        // A body or form over the request limits: the app's own forms never send one.
+        AbuseSignal.FormTimestamp or AbuseSignal.Captcha or AbuseSignal.FormTooLarge => 2,
         // Strong but not alone decisive: memory may run out under someone else's load too.
         AbuseSignal.CircuitOutOfMemory => 5,
         _ => 1,

@@ -4,9 +4,10 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace Telrang.Web.Security;
 
 /// <summary>
-/// Per-IP sliding-window limits: the vote page POSTs (DESIGN.md §21.1), the sensitive account POSTs, and page GETs
+/// Per-IP sliding-window limits: the vote page POSTs (DESIGN.md §21.1), the sensitive account POSTs, page GETs
 /// (DESIGN.md §31, pentest R3-RES-6: <c>RateLimiting:PageGetsPerMinute</c>, default 600 per client key, 0 = off; static
-/// files, branding, the Blazor and health endpoints are not counted). The Identity pages are all served by the single
+/// files, branding, the Blazor and health endpoints are not counted) and every other POST
+/// (<c>RateLimiting:OtherPostsPerMinute</c>, default 120 per client key, 0 = off; not the Blazor hub). The Identity pages are all served by the single
 /// Razor Components endpoint, so endpoint policies cannot target them; instead a global limiter matches POSTs to the
 /// sensitive /Account paths. Heavy GETs also have a concurrency limit (<see cref="HeavyGetLimiter"/>).
 /// </summary>
@@ -52,6 +53,7 @@ public static class RateLimiting
         var setupPerMinute = config.GetValue("RateLimiting:SetupPermitPerMinute", 5);
         var votePerMinute = config.GetValue("RateLimiting:VotePermitPerMinute", 120);
         var pageGetsPerMinute = config.GetValue("RateLimiting:PageGetsPerMinute", 600);
+        var otherPostsPerMinute = config.GetValue("RateLimiting:OtherPostsPerMinute", 120);
 
         services.AddRateLimiter(options =>
         {
@@ -60,9 +62,9 @@ public static class RateLimiting
             {
                 TimeSpan? retryAfter = ctx.Lease.TryGetMetadata(MetadataName.RetryAfter, out var after) ? after : null;
                 var http = ctx.HttpContext;
-                // Vote posts (DESIGN.md §21.1) and page GETs are no abuse signal: a class or office behind one address must
-                // not get blocked; the captcha and the per-poll limits handle bots.
-                if (!IsVotePost(http) && !IsPageGet(http))
+                // Vote posts (DESIGN.md §21.1), page GETs and other posts are no abuse signal: a class or office behind one
+                // address must not get blocked; the captcha and the per-poll limits handle bots.
+                if (!IsVotePost(http) && !IsPageGet(http) && !IsOtherPost(http))
                 {
                     http.RequestServices.GetService<AbuseTracker>()?.Record(ClientKeys.ForAbuse(http),
                         http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, AbuseSignal.RateLimited);
@@ -75,19 +77,10 @@ public static class RateLimiting
             {
                 // Per IPv6 /48 like the abuse tracker (pentest R2-VOTE-1): a /64 each would let one /48 multiply the limit.
                 if (IsVotePost(ctx)) return SlidingWindow("vote:" + ClientKeys.ForAbuse(ctx), votePerMinute);
-                if (HttpMethods.IsPost(ctx.Request.Method))
-                {
-                    var path = ctx.Request.Path.Value?.TrimEnd('/') ?? "";
-                    if (string.Equals(path, AdminSetupPath, StringComparison.OrdinalIgnoreCase) || string.Equals(path, RecoverPath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return SlidingWindow("setup:" + ClientKey(ctx), setupPerMinute);
-                    }
-                    if (LimitedAccountPosts.Contains(path) || path.StartsWith(SetupLinkPrefix + "/", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return SlidingWindow("auth:" + ClientKey(ctx), authPerMinute);
-                    }
-                }
+                if (IsSetupPost(ctx)) return SlidingWindow("setup:" + ClientKey(ctx), setupPerMinute);
+                if (IsAuthPost(ctx)) return SlidingWindow("auth:" + ClientKey(ctx), authPerMinute);
                 if (pageGetsPerMinute > 0 && IsPageGet(ctx)) return SlidingWindow("get:" + ClientKeys.ForAbuse(ctx), pageGetsPerMinute);
+                if (otherPostsPerMinute > 0 && IsOtherPost(ctx)) return SlidingWindow("post:" + ClientKeys.ForAbuse(ctx), otherPostsPerMinute);
                 return RateLimitPartition.GetNoLimiter("unlimited");
             });
 
@@ -114,6 +107,27 @@ public static class RateLimiting
         var last = value[(value.LastIndexOf('/') + 1)..];
         return !last.Contains('.', StringComparison.Ordinal) || last.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// A request with a body method (POST, PUT, PATCH, DELETE) that no other partition takes: not a vote post, not the
+    /// Blazor hub (circuits have their own limits, and long polling posts every circuit message).
+    /// </summary>
+    internal static bool IsOtherPost(HttpContext ctx)
+    {
+        var method = ctx.Request.Method;
+        if (HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method) || HttpMethods.IsTrace(method)) return false;
+        return !IsVotePost(ctx) && !IsSetupPost(ctx) && !IsAuthPost(ctx) && !RequestLimits.IsHub(ctx);
+    }
+
+    /// <summary>A POST to <c>/setup</c> or <c>/setup/recover</c>.</summary>
+    private static bool IsSetupPost(HttpContext ctx) => HttpMethods.IsPost(ctx.Request.Method) && TrimmedPath(ctx) is var path
+        && (string.Equals(path, AdminSetupPath, StringComparison.OrdinalIgnoreCase) || string.Equals(path, RecoverPath, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>A POST to a sensitive account path or a setup-link page.</summary>
+    private static bool IsAuthPost(HttpContext ctx) => HttpMethods.IsPost(ctx.Request.Method) && TrimmedPath(ctx) is var path
+        && (LimitedAccountPosts.Contains(path) || path.StartsWith(SetupLinkPrefix + "/", StringComparison.OrdinalIgnoreCase));
+
+    private static string TrimmedPath(HttpContext ctx) => ctx.Request.Path.Value?.TrimEnd('/') ?? "";
 
     /// <summary>Every POST under <c>/p/</c> (the vote page's forms).</summary>
     internal static bool IsVotePost(HttpContext ctx) => HttpMethods.IsPost(ctx.Request.Method) && ctx.Request.Path.StartsWithSegments("/p");
