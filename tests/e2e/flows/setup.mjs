@@ -4,8 +4,13 @@ import { totp } from '../lib/totp.mjs';
 export const ADMIN_EMAIL = 'admin@example.com';
 export const PASSWORD = 'correct horse battery staple';
 
-/** Public forms refuse a post sooner than Abuse:FormMinSeconds (2 s) after the page was served. */
-export const formAge = page => page.waitFor('performance.now() > 2300', 'the form to be old enough', 10_000);
+/**
+ * Public forms refuse a post sooner than Abuse:FormMinSeconds (2 s) after the server stamped the form. Counted from the
+ * response's first byte (after the stamp), not from navigation start: a slow first response (cold start on CI) would
+ * otherwise eat into the 2 s.
+ */
+export const formAge = page => page.waitFor(
+  `performance.now() - performance.getEntriesByType('navigation')[0].responseStart > 2300`, 'the form to be old enough', 10_000);
 
 export const name = 'setup';
 export const required = true;
