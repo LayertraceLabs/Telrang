@@ -323,7 +323,9 @@ jobs:
           case "$VERSION" in *-*) ;; *) tags+=(-t "$NAME:latest") ;; esac
           docker buildx imagetools create "${tags[@]}" "$NAME@$DIGEST"
           docker buildx imagetools inspect "$NAME:$VERSION" | grep -F "$DIGEST"
+      # GitHub stores attestations only for public repositories (or paid plans): skipped while private.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event.repository.visibility == 'public'
         with:
           subject-name: ${{ needs.docker.outputs.name }}
           subject-digest: ${{ needs.docker.outputs.digest }}
@@ -345,15 +347,19 @@ jobs:
           name: release-files
           path: release
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event.repository.visibility == 'public'
         with:
           subject-checksums: release/SHA256SUMS
       - name: Create the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLIC: ${{ github.event.repository.visibility == 'public' }}
         run: |
           prerelease=""
           case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          verify="sha256sum -c SHA256SUMS"
+          [ "$PUBLIC" = true ] && verify="$verify; gh attestation verify <file> --repo $GITHUB_REPOSITORY"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag $prerelease \
             --title "Telrang $VERSION" \
-            --notes "Install: docs/deploy/ (docker.md, linux.md, windows.md). Image: ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telrang:$VERSION. Verify a download: sha256sum -c SHA256SUMS; gh attestation verify <file> --repo $GITHUB_REPOSITORY" \
+            --notes "Install: docs/deploy/ (docker.md, linux.md, windows.md). Image: ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telrang:$VERSION. Verify a download: $verify" \
             release/*.tar.gz release/*.zip release/SHA256SUMS

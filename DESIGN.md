@@ -1518,6 +1518,8 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   group, probes on TCP 8080); it now follows docs/deploy/linux.md and probes through the Unix socket, and prints the
   journal on failure. The e2e `formAge` counts from the response's first byte, not navigation start (a slow cold first
   response made the setup form "too fast").
+  Build provenance attestations need a public repository on the free plan: release.yml skips them while private (as
+  CodeQL), and the release notes name `gh attestation verify` only when they exist.
 
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
