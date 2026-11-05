@@ -24,12 +24,18 @@ function guardSubmit(form) {
 }
 
 function initAll() {
+  const loads = [];
   for (const [selector, load] of parts) {
     const roots = [...document.querySelectorAll(selector)];
     // A module that fails to load (network, or the page left while it loaded) leaves the plain form as it is.
-    if (roots.length) load().then(m => roots.forEach(r => m.init(r)), e => console.warn('vote: enhancement not loaded', e?.message ?? e));
+    if (roots.length) loads.push(load().then(m => roots.forEach(r => m.init(r)), e => console.warn('vote: enhancement not loaded', e?.message ?? e)));
   }
   document.querySelectorAll('form[data-vote-form]').forEach(guardSubmit);
+  // Marked while the modules load, so a scripted browser can wait for them before it leaves the page.
+  if (loads.length) {
+    document.documentElement.dataset.enhancing = '1';
+    Promise.allSettled(loads).then(() => delete document.documentElement.dataset.enhancing);
+  }
 }
 
 // Back/forward cache: a page restored after the POST must be usable again.
