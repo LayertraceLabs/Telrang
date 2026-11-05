@@ -171,7 +171,10 @@ export class Page {
    * (scripts/npm-stack-test.sh) and, more rarely, on plain HTTP (a CI run, setup flow, "Continue" on the recovery codes).
    */
   async loaded() {
-    await this.waitFor(`document.readyState === 'complete'`, 'the current page to finish loading', 10_000).catch(() => { });
+    // Lazy modules (vote.js marks <html data-enhancing> while they load) count too: leaving the page mid-import makes
+    // Firefox report an integrity failure with the empty hash.
+    await this.waitFor(`document.readyState === 'complete' && !document.documentElement.dataset.enhancing`,
+      'the current page to finish loading', 10_000).catch(() => { });
   }
 
   async goto(p) {

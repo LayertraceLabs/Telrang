@@ -1521,6 +1521,9 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   response made the setup form "too fast").
   Build provenance attestations need a public repository on the free plan: release.yml skips them while private (as
   CodeQL), and the release notes name `gh attestation verify` only when they exist.
+  v0.3.0-rc.4 (not published): the same race on the vote page's lazy imports (`sortable.esm.js` via ranking.js),
+  which start after `readyState` is complete; vote.js now marks `<html data-enhancing>` while they load and the
+  harness's `loaded()` waits for it to go.
 
 - 2026-11-05 (request limits): every request gets small body and form limits. Kestrel refuses bodies over 256 kB (four
   times the vote form's 64 kB, the largest HTTP form; the editor and branding go over the circuit); forms allow at most
