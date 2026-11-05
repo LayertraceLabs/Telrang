@@ -165,10 +165,17 @@ export class Page {
 
   url(p) { return p.startsWith('http') ? p : this.base + p; }
 
-  async goto(p) {
-    // The current page loads to the end first (after a click that navigated, say): Firefox reports the module scripts of a
-    // page left mid-load as integrity failures when they arrive brotli-encoded (over HTTPS, scripts/npm-stack-test.sh).
+  /**
+   * Lets the current page load to the end before anything that may leave it (goto, a click on a link or submit): Firefox
+   * reports the module scripts of a page left mid-load as integrity failures (empty-body hash), over HTTPS with brotli
+   * (scripts/npm-stack-test.sh) and, more rarely, on plain HTTP (a CI run, setup flow, "Continue" on the recovery codes).
+   */
+  async loaded() {
     await this.waitFor(`document.readyState === 'complete'`, 'the current page to finish loading', 10_000).catch(() => { });
+  }
+
+  async goto(p) {
+    await this.loaded();
     await this.browser.send('browsingContext.navigate', { context: this.ctx, url: this.url(p), wait: 'complete' });
   }
 
@@ -239,6 +246,7 @@ export class Page {
 
   /** A real pointer click (trusted event, user activation) in the middle of the first visible match. */
   async click(selector) {
+    await this.loaded();
     await this.eval(`(() => {
       const all = [...document.querySelectorAll(${JSON.stringify(selector)})];
       const e = all.find(x => x.offsetParent !== null || x.getClientRects().length > 0) ?? all[0];
