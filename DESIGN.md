@@ -1511,6 +1511,9 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   footer of every install format shows the tag's version and commit; the SDK no longer appends its own source hash
   (`IncludeSourceRevisionInInformationalVersion=false`). CodeQL (skipped while the repository is private), Dependabot
   for NuGet, Actions and the Docker base images, and SECURITY.md (GitHub private vulnerability reporting).
+- 2026-11-05 (first CI runs): private-repo runners have 2 cores, so the heavy-GET total (2 × cores, at least 4) equals
+  the per-client limit there; the limiter test pins the total. The e2e harness's `click` now also lets the current page
+  finish loading first (as `goto` did): one run reported a page left mid-load as module integrity failures on plain HTTP.
 
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
