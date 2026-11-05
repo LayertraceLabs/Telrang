@@ -88,7 +88,7 @@ Poll            Id (Guid, random v4, PK), OwnerId, Title, Type, Scoring (the fir
                 DefinitionJson (validated PollDefinition: poll-wide settings + Questions[], each with Key, type,
                 type settings and options; the only stored form of a poll),
                 ResultsVisibility, VoterMode, ClosesAt?, CreatedAt, UpdatedAt,
-                ClosedAt? (manual close), ClosedNotifiedAt? (results-ready sweep handled this close; cleared when open again)
+                ClosedAt? (manual close), ClosedNotifiedAt? (results-ready sweep handled this close; kept on reopen, §17)
                                                 ClosesAt = end of the "Closes on" day in the poll's time zone
 Ballot          Id, PollId, VoterKey?, UserId? (FK, SET NULL), VoterIdentity, ResponseNo, DisplayName?, Alias?,
                 SubmittedAt, UpdatedAt, PayloadJson ({"q1": {...}}: one part per question key), NotifyOnClose (account ballots of a verified address only)
@@ -558,7 +558,7 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   - Rate limiting: Identity pages share the single Razor Components endpoint, so a global
     partitioned limiter matches POSTs to `/Account/{Login,Register,LoginWith2fa,
     LoginWithRecoveryCode,ForgotPassword,ResetPassword,ResendEmailConfirmation}`: sliding
-    window, 10/min per client IP (IPv6 per /64), configurable. Named policy `PollPassword` for
+    window, 10/min per client IP (IPv6 per /64; superseded 2026-11-05: per /48), configurable. Named policy `PollPassword` for
     phase 3. Login now counts failures toward lockout (`lockoutOnFailure: true`).
   - Forwarded headers trust any source by default (proxy IP unknown in containers), with
     `ForwardLimit = 1`; `ReverseProxy:KnownProxies`/`KnownNetworks` restrict it. HTTPS
@@ -642,7 +642,7 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
       429 "Too many attempts" before checking the hash, so a correct guess cannot be confirmed
       either. Trade-off: an attacker can keep a poll's gate shut for new browsers; browsers that
       already hold a grant are unaffected, and the window is short. The per-IP `PollPassword`
-      policy now buckets IPv6 per /48 (other limits stay per /64).
+      policy now buckets IPv6 per /48 (other limits stay per /64; superseded 2026-11-05: all per /48).
     - A4 `POST /Account/PasskeyRequestOptions` joins the rate-limited Identity POSTs. Login looks
       the user up first and, if unknown, verifies against `DummyPasswordHash` (random password,
       hashed once at startup with the real 600k options). The lockout-redirect oracle stays (§8).
@@ -1438,7 +1438,8 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   estimated, `Results:CacheMegabytes`) holds the computed results and one number per option per response;
   `PollChangeNotifier.Invalidated` drops entries. `HeavyGetLimiter`: results page and CSVs 4 at once per client key,
   2 × cores in all, 503 + `Retry-After: 2`, no abuse signal. Page GETs 600/min per client key
-  (`RateLimiting:PageGetsPerMinute`), static files, branding, Blazor and health not counted, no abuse signal. The home
+  (`RateLimiting:PageGetsPerMinute`), static files, branding, Blazor and health not counted (since 2026-11-05: only
+  abuse-exempt endpoints; missing files and dotted paths count), no abuse signal. The home
   examples are rendered once a day (`ShowcaseCache`; the dates example starts today, so the day is part of the key, the
   theme is not: colours come from the stylesheet). A circuit's out-of-memory records `AbuseSignal.CircuitOutOfMemory`
   (weight 5).
@@ -1520,6 +1521,25 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   response made the setup form "too fast").
   Build provenance attestations need a public repository on the free plan: release.yml skips them while private (as
   CodeQL), and the release notes name `gh attestation verify` only when they exist.
+
+- 2026-11-05 (request limits): every request gets small body and form limits. Kestrel refuses bodies over 256 kB (four
+  times the vote form's 64 kB, the largest HTTP form; the editor and branding go over the circuit); forms allow at most
+  64 values, 64 kB per value and 256-character keys; `/_blazor` allows four circuit messages so long-polling sends
+  still fit. `FormLimitMiddleware` enforces this on any server, refuses an oversized Content-Length before reading and
+  records `FormTooLarge` (weight 2); failed antiforgery checks record `Antiforgery` (weight 1, not on vote posts).
+  Reason: before, any anonymous POST could make the server buffer a 30 MB form, enough to run it out of memory with a
+  few dozen parallel requests. POSTs that no other partition takes get `RateLimiting:OtherPostsPerMinute` (120, no
+  abuse signal). Page GETs are uncounted only for abuse-exempt endpoints, so missing files and dotted paths count.
+  Heavy GETs match the path in any case (routing does), Kestrel sends no Server header, and every request limit,
+  sign-in and setup included, buckets IPv6 per /48 like the abuse tracker (a /64 bucket let one /48 multiply the
+  sign-in limit 65,536 times).
+- 2026-11-05 (stability): the mail sender claims each message before sending (see §14.5): delivery is at least once,
+  a failed save no longer re-sends every 10 s past the hourly cap. A results computation removes its own in-flight
+  entry when it ends and a change drops a running one, so an abandoned computation no longer stays in memory
+  uncounted. The close sweep drops polls mailed within `NotifyInterval` in SQL; open polls and closes mailed long ago
+  are still filtered in memory, because `ClosedAt`/`ClosesAt` are not comparable on SQLite (a comparable column is a
+  later migration). A database error during the live stream's recheck ends the stream with an Information line, not a
+  failed request per open stream.
 
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
@@ -1641,7 +1661,9 @@ DSL source-size limit is gone (§20.4).
   security None is refused (also by the transport), so it cannot be sent in clear text to another server (pentest AV-11).
   Works with an SMTP provider's submission port (e.g. smtp.example.com:587, STARTTLS, token as
   password). Library: MailKit (add to the dependency list).
-- All mail goes through an outbox table + background sender: retries after 1, 5, 15 and 60 minutes,
+- All mail goes through an outbox table + background sender: each message is claimed before it is sent (`SendAfter`
+  15 min ahead, saved first) and its outcome saved without the stopping token, so a failed save means one more send
+  after the claim runs out (at least once), never a re-send every pass. Retries after 1, 5, 15 and 60 minutes,
   dead-letter on the 5th failure (so every step is used), per-hour global cap (default 100), per-recipient
   cooldown (default one message per type per 15 min), max 3 unanswered messages per recipient per day.
   The admin's test mail and results-ready mails (opt-in, verified address, one per poll close) skip the
@@ -1995,7 +2017,7 @@ Single container, SQLite, no scale-out: the in-memory pieces below are fine and 
   the editor preview keep the CSS-only switcher (no form, no `?view=`): it already works without JS.
 - Limits: `[RequestSizeLimit(65536)]`, `[RequestFormLimits(ValueCountLimit = 232, ValueLengthLimit = 16384)]` on
   `VotePage` (`VoteFormLimits`). `FormLimitMiddleware` (before antiforgery) also refuses a body over the endpoint's
-  limit itself (Content-Length, then a counting stream), because only Kestrel applies the metadata, and pre-reads the
+  limit (since 2026-11-05: over the global `RequestLimits` default on every other request, §13) itself (Content-Length, then a counting stream), because only Kestrel applies the metadata, and pre-reads the
   form under the limits so a refusal is "Form too large" (413 / 400), not antiforgery's "Form expired".
 - Stamp: missing or forged counts as too old ("The form was open too long. Submit it again."); too old records no
   abuse signal (a person, not a bot); honeypot and too fast do, as before. In-process callers without a `BallotGuard`
@@ -2059,7 +2081,8 @@ Single container, SQLite, no scale-out: the in-memory pieces below are fine and 
 - Rate limit: a sliding window per client key for all `/p/*` POSTs (`RateLimiting:VotePermitPerMinute`, default 120,
   sized for a class or office behind one address). Refusals of this partition are not abuse signals (the captcha and
   the per-poll limits handle bots; a shared NAT must not get blocked).
-- Form limits are endpoint metadata on the vote page (`[RequestSizeLimit(65536)]`, `[RequestFormLimits(ValueCountLimit =
+- Form limits are endpoint metadata on the vote page (every other request gets the smaller global defaults of
+  `RequestLimits`, 2026-11-05; `[RequestSizeLimit(65536)]`, `[RequestFormLimits(ValueCountLimit =
   2 × OptionsMax ceiling + 32, ValueLengthLimit = …)]`), so antiforgery and FormGuard read the form under them too. An
   oversized body is a 413, too many values a 400, both as the static error page; `InvalidDataException` /
   `BadHttpRequestException` from form reading are caught there, never a 500. A test posts more than 64 kB.
