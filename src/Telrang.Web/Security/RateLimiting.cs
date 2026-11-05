@@ -324,13 +324,15 @@ public sealed class HeavyGetLimiter : IDisposable
     public IDisposable? TryAcquire(string clientKey) =>
         LeaseSet.TryAcquire(() => clients.AttemptAcquire(clientKey), () => total.AttemptAcquire());
 
-    /// <summary>A GET or HEAD of the results page or a CSV download.</summary>
+    /// <summary>A GET or HEAD of the results page or a CSV download, in any case (routing ignores case).</summary>
     public static bool IsHeavy(HttpContext ctx)
     {
         if (!HttpMethods.IsGet(ctx.Request.Method) && !HttpMethods.IsHead(ctx.Request.Method)) return false;
         var parts = (ctx.Request.Path.Value ?? "").Trim('/').Split('/');
-        return parts.Length == 3 && ((parts[0] == "p" && parts[2] == "results")
-            || (parts[0] == "polls" && parts[2] is "export.csv" or "results.csv"));
+        return parts.Length == 3 && ((Is(parts[0], "p") && Is(parts[2], "results"))
+            || (Is(parts[0], "polls") && (Is(parts[2], "export.csv") || Is(parts[2], "results.csv"))));
+
+        static bool Is(string segment, string expected) => string.Equals(segment, expected, StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose()
