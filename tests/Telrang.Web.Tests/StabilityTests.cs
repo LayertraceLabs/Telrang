@@ -1,5 +1,7 @@
+using Telrang.Core.Ids;
 using Telrang.Web.Data;
 using Telrang.Web.Features.Mail;
+using Telrang.Web.Features.Polls;
 using Telrang.Web.Features.Results;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -152,5 +154,34 @@ public class StabilityTests
         release.SetResult(Data("d"));
         Assert.Equal("d", (await waiter).DefinitionJson); // its caller still gets it
         Assert.Equal(0, cache.Count); // but it is not stored
+    }
+
+    // ---- close sweep ------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task The_close_sweep_loads_no_poll_that_was_mailed_within_the_interval_or_has_no_close()
+    {
+        await using var factory = new AppFactory();
+        var owner = await CreateUserAsync(factory, "o@example.com");
+        var now = DateTimeOffset.UtcNow;
+        async Task<Guid> PollAsync(DateTimeOffset? closedAt, DateTimeOffset? closesAt, DateTimeOffset? notifiedAt)
+        {
+            Assert.True(PollId.TryDecode(await CreatePollAsync(factory, owner, RankedDraft()), out var id));
+            await WithScope(factory, sp => sp.GetRequiredService<ApplicationDbContext>().Polls.Where(p => p.Id == id)
+                .ExecuteUpdateAsync(u => u.SetProperty(p => p.ClosedAt, closedAt).SetProperty(p => p.ClosesAt, closesAt)
+                    .SetProperty(p => p.ClosedNotifiedAt, notifiedAt)));
+            return id;
+        }
+        var closedNeverMailed = await PollAsync(now.AddHours(-1), null, null);
+        var openWithDate = await PollAsync(null, now.AddDays(1), null);
+        var mailedLongAgo = await PollAsync(now.AddHours(-1), null, now.AddDays(-2));
+        var mailedRecently = await PollAsync(now.AddMinutes(-10), null, now.AddHours(-1));
+        var noClose = await PollAsync(null, null, null);
+
+        var loaded = await WithScope(factory, sp => PollSweepService.NotifyCandidates(sp.GetRequiredService<ApplicationDbContext>(), now)
+            .Select(p => p.Id).ToListAsync());
+        Assert.Equal(new[] { closedNeverMailed, openWithDate, mailedLongAgo }.Order(), loaded.Order());
+        Assert.DoesNotContain(mailedRecently, loaded);
+        Assert.DoesNotContain(noClose, loaded);
     }
 }

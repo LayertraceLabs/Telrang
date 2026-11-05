@@ -121,8 +121,7 @@ public sealed class PollSweepService(
         var linkBase = publicUrl.TrimEnd('/') + "/";
         var now = time.GetUtcNow();
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        // Nullable DateTimeOffset comparisons do not translate for SQLite: decide "closed" and "due" in memory.
-        var candidates = (await db.Polls.AsNoTracking().Where(p => p.ClosedAt != null || p.ClosesAt != null)
+        var candidates = (await NotifyCandidates(db, now)
                 .Select(p => new { p.Id, p.Title, p.ClosedAt, p.ClosesAt, p.ClosedNotifiedAt }).ToListAsync(ct))
             .Where(p => NotifyDue(p.ClosedAt, p.ClosesAt, p.ClosedNotifiedAt, now))
             .ToList();
@@ -166,6 +165,19 @@ public sealed class PollSweepService(
     public static readonly TimeSpan NotifyInterval = TimeSpan.FromDays(1);
 
     /// <summary>
+    /// The polls <see cref="NotifyDue"/> can hold at <paramref name="now"/>, narrowed as far as SQL can on both providers:
+    /// one with a close at all, and not mailed within <see cref="NotifyInterval"/> (<c>ClosedNotifiedAt</c> is stored as a
+    /// comparable long). <c>ClosedAt</c> and <c>ClosesAt</c> are plain <see cref="DateTimeOffset"/> columns, which SQLite
+    /// cannot compare, so "closed" and "closed again since the last mailing" are decided in memory.
+    /// </summary>
+    public static IQueryable<Poll> NotifyCandidates(ApplicationDbContext db, DateTimeOffset now)
+    {
+        var mailedBefore = now - NotifyInterval;
+        return db.Polls.AsNoTracking().Where(p => (p.ClosedAt != null || p.ClosesAt != null)
+            && (p.ClosedNotifiedAt == null || p.ClosedNotifiedAt <= mailedBefore));
+    }
+
+    /// <summary>
     /// A poll's close is mailed when it is closed and was never mailed, or closed again after its last mailing and that
     /// mailing is at least <see cref="NotifyInterval"/> old. Reopening never re-arms it sooner (R2-POLLS-3: close/reopen
     /// cycles mailed every voter on every sweep); a close inside the interval is mailed once the interval has passed.
@@ -185,7 +197,9 @@ public sealed class PollSweepService(
         var now = time.GetUtcNow();
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var due = new List<Guid>();
-        foreach (var p in await db.Polls.AsNoTracking().Select(p => new { p.Id, p.ClosedAt, p.ClosesAt }).ToListAsync(ct))
+        // A poll without any close is never due (Retention.DeleteOn); the close instants are compared in memory (SQLite).
+        foreach (var p in await db.Polls.AsNoTracking().Where(p => p.ClosedAt != null || p.ClosesAt != null)
+                     .Select(p => new { p.Id, p.ClosedAt, p.ClosesAt }).ToListAsync(ct))
         {
             // Each poll on its own: one row that cannot be evaluated never stops retention for the rest (AV-14).
             try
