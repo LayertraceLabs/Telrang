@@ -42,6 +42,9 @@ public sealed class ResultsCache : IDisposable
     /// <summary>Entries held now (tests).</summary>
     public int Count => cache.Count;
 
+    /// <summary>Computations under way (tests).</summary>
+    public int Computing => computing.Count;
+
     /// <summary>
     /// The poll's results data computed from <paramref name="definitionJson"/> (the stored definition the caller's access
     /// check read): from the cache when an entry for this definition exists, else by <paramref name="compute"/>, shared
@@ -55,46 +58,55 @@ public sealed class ResultsCache : IDisposable
         // Shared only among callers that saw the same version: a caller after a change never gets an older computation.
         var flight = computing.AddOrUpdate(pollId, _ => new Flight(version, this, pollId, compute),
             (_, running) => running.Version == version ? running : new Flight(version, this, pollId, compute));
-        PollResultsData data;
-        try
-        {
-            data = await flight.Task.Value.WaitAsync(ct);
-        }
-        finally
-        {
-            if (flight.Task.IsValueCreated && flight.Task.Value.IsCompleted) computing.TryRemove(new(pollId, flight));
-        }
+        var data = await flight.Task.Value.WaitAsync(ct);
         // A computation shared with a caller that read another definition (an edit landed between): compute our own.
         return data.DefinitionJson == definitionJson ? data : await compute(ct);
     }
 
-    private sealed class Flight(long version, ResultsCache owner, Guid pollId, Func<CancellationToken, Task<PollResultsData>> compute)
+    private sealed class Flight
     {
-        public long Version { get; } = version;
-        public Lazy<Task<PollResultsData>> Task { get; } = new(() => owner.ComputeAsync(pollId, compute, version));
+        public Flight(long version, ResultsCache owner, Guid pollId, Func<CancellationToken, Task<PollResultsData>> compute)
+        {
+            Version = version;
+            Task = new(() => owner.ComputeAsync(pollId, compute, version, this));
+        }
+
+        public long Version { get; }
+        public Lazy<Task<PollResultsData>> Task { get; }
     }
 
-    private async Task<PollResultsData> ComputeAsync(Guid pollId, Func<CancellationToken, Task<PollResultsData>> compute, long version)
+    private async Task<PollResultsData> ComputeAsync(Guid pollId, Func<CancellationToken, Task<PollResultsData>> compute, long version,
+        Flight flight)
     {
-        // Not the caller's token: other callers share this computation.
-        var data = await compute(CancellationToken.None);
-        if (Volatile.Read(ref versions[Stripe(pollId)]) == version)
+        try
         {
-            if (NearMemoryLimit()) cache.Compact(1.0);
-            cache.Set(pollId, data, new MemoryCacheEntryOptions
+            // Not the caller's token: other callers share this computation.
+            var data = await compute(CancellationToken.None);
+            if (Volatile.Read(ref versions[Stripe(pollId)]) == version)
             {
-                Size = Math.Min(data.EstimatedBytes, LimitBytes),
-                SlidingExpiration = Idle,
-                AbsoluteExpirationRelativeToNow = Longest,
-            });
+                if (NearMemoryLimit()) cache.Compact(1.0);
+                cache.Set(pollId, data, new MemoryCacheEntryOptions
+                {
+                    Size = Math.Min(data.EstimatedBytes, LimitBytes),
+                    SlidingExpiration = Idle,
+                    AbsoluteExpirationRelativeToNow = Longest,
+                });
+            }
+            return data;
         }
-        return data;
+        finally
+        {
+            // The computation removes itself, whether or not anyone still waits: a finished flight kept here would hold the
+            // full data outside the size limit, and a failed one would hand its exception to the next caller.
+            computing.TryRemove(new(pollId, flight));
+        }
     }
 
     private void Drop(Guid pollId)
     {
         Interlocked.Increment(ref versions[Stripe(pollId)]);
         cache.Remove(pollId);
+        computing.TryRemove(pollId, out _); // a running one finishes for its callers, but nobody new joins it
     }
 
     private static int Stripe(Guid pollId) => (pollId.GetHashCode() & int.MaxValue) % Stripes;

@@ -1,5 +1,6 @@
 using Telrang.Web.Data;
 using Telrang.Web.Features.Mail;
+using Telrang.Web.Features.Results;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -89,5 +90,67 @@ public class StabilityTests
             Armed && eventData.Context!.ChangeTracker.Entries<OutboxMessage>().Any(e => e.State == EntityState.Modified)
                 ? throw new DbUpdateException("Disk full (fake).")
                 : base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
+
+    // ---- results cache ----------------------------------------------------------------------------------
+
+    private static PollResultsData Data(string definition) => new(definition, null!, []);
+
+    private static async Task UntilAsync(Func<bool> condition)
+    {
+        for (var i = 0; i < 200 && !condition(); i++) await Task.Delay(10);
+        Assert.True(condition());
+    }
+
+    [Fact]
+    public async Task A_computation_nobody_waits_for_any_more_does_not_stay_in_the_cache()
+    {
+        await using var factory = new AppFactory();
+        var cache = factory.Services.GetRequiredService<ResultsCache>();
+        var poll = Guid.NewGuid();
+        var release = new TaskCompletionSource<PollResultsData>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource();
+        var waiter = cache.GetAsync(poll, "d", _ => release.Task, cts.Token);
+        Assert.Equal(1, cache.Computing);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiter);
+
+        release.SetResult(Data("d"));
+        await UntilAsync(() => cache.Computing == 0);
+        Assert.Equal(1, cache.Count); // stored as usual, within the size limit
+    }
+
+    [Fact]
+    public async Task A_failed_computation_nobody_waited_for_is_not_handed_to_the_next_caller()
+    {
+        await using var factory = new AppFactory();
+        var cache = factory.Services.GetRequiredService<ResultsCache>();
+        var poll = Guid.NewGuid();
+        var fail = new TaskCompletionSource<PollResultsData>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource();
+        var waiter = cache.GetAsync(poll, "d", _ => fail.Task, cts.Token);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiter);
+        fail.SetException(new InvalidOperationException("database gone (fake)"));
+        await UntilAsync(() => cache.Computing == 0);
+
+        var data = await cache.GetAsync(poll, "d", _ => Task.FromResult(Data("d")), CancellationToken.None);
+        Assert.Equal("d", data.DefinitionJson);
+    }
+
+    [Fact]
+    public async Task A_change_drops_a_running_computation()
+    {
+        await using var factory = new AppFactory();
+        var cache = factory.Services.GetRequiredService<ResultsCache>();
+        var poll = Guid.NewGuid();
+        var release = new TaskCompletionSource<PollResultsData>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiter = cache.GetAsync(poll, "d", _ => release.Task, CancellationToken.None);
+        Assert.Equal(1, cache.Computing);
+        factory.Services.GetRequiredService<PollChangeNotifier>().End(poll);
+        Assert.Equal(0, cache.Computing);
+        release.SetResult(Data("d"));
+        Assert.Equal("d", (await waiter).DefinitionJson); // its caller still gets it
+        Assert.Equal(0, cache.Count); // but it is not stored
     }
 }
