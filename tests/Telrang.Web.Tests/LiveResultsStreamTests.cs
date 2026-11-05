@@ -8,8 +8,11 @@ using Telrang.Web.Features.Polls;
 using Telrang.Web.Features.Results;
 using Telrang.Web.Security;
 using Microsoft.AspNetCore.Identity;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using static Telrang.Web.Tests.TestUtil;
 
 namespace Telrang.Web.Tests;
@@ -442,5 +445,40 @@ public sealed class LiveResultsStreamTests
             if (!reopened) await Task.Delay(50);
         }
         Assert.True(reopened);
+    }
+
+    private sealed class FakeDbException() : DbException("The database is restarting (fake).");
+
+    /// <summary>Fails every query while armed, as a database restart would.</summary>
+    private sealed class FailQueries : DbCommandInterceptor
+    {
+        public volatile bool Armed;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default) =>
+            Armed ? throw new FakeDbException() : base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+    }
+
+    [Fact]
+    public async Task A_database_error_during_a_recheck_ends_the_stream_without_an_error_log()
+    {
+        var clock = new ManualTime(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero));
+        var fail = new FailQueries();
+        await using var factory = new AppFactory(services: s =>
+        {
+            s.AddSingleton<TimeProvider>(clock);
+            s.ConfigureDbContext<ApplicationDbContext>(o => o.AddInterceptors(fail));
+        });
+        var ownerId = await CreateUserAsync(factory, "o@example.com");
+        var id = await CreatePollAsync(factory, ownerId, RankedDraft());
+        var owner = await LoggedInBrowserAsync(factory, "o@example.com");
+        await using var reader = await OpenOkAsync(owner, id);
+
+        fail.Armed = true;
+        Assert.Null(await reader.NextAdvancingAsync(clock, TimeSpan.FromSeconds(5))); // the next ping's check fails: the end
+        fail.Armed = false;
+        var ring = factory.Services.GetRequiredService<Telrang.Web.Features.Status.LogRing>().Snapshot();
+        // EF logs the failed command itself; nothing after it may (the server's unhandled-exception line, one per stream).
+        Assert.DoesNotContain(ring, e => e.Level >= LogLevel.Error && !e.Category.StartsWith("Microsoft.EntityFrameworkCore.", StringComparison.Ordinal));
     }
 }

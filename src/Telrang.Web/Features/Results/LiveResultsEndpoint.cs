@@ -43,12 +43,12 @@ public static class LiveResultsEndpoint
     private static async Task<IResult> HandleAsync(string id, HttpContext http, UserManager<ApplicationUser> users,
         IDbContextFactory<ApplicationDbContext> dbFactory, PollAccessService access, PollChangeNotifier notifier,
         LiveStreamLimiter limiter, AbuseTracker abuse, BlockedRangeService ranges, TimeProvider time,
-        IOptions<IdentityOptions> identityOptions, IHostApplicationLifetime lifetime)
+        IOptions<IdentityOptions> identityOptions, IHostApplicationLifetime lifetime, ILoggerFactory loggers)
     {
         if (users.GetUserId(http.User) is not { } userId) return TypedResults.NotFound();
         var check = new AccessCheck(id, userId, http.User.IsInRole(AppRoles.Admin), http.Connection.RemoteIpAddress,
             http.User.FindFirstValue(identityOptions.Value.ClaimsIdentity.SecurityStampClaimType),
-            dbFactory, access, abuse, ranges, time);
+            dbFactory, access, abuse, ranges, time, loggers.CreateLogger(typeof(LiveResultsEndpoint)));
         if (await check.RunAsync(http.RequestAborted) is not { } poll) return TypedResults.NotFound();
 
         if (limiter.TryAcquire(ClientKeys.ForAbuse(http), userId) is not { } lease)
@@ -81,60 +81,53 @@ public static class LiveResultsEndpoint
         TimeProvider time, [EnumeratorCancellation] CancellationToken ct)
     {
         using var sub = notifier.Subscribe(poll.Id);
-        try
+        var started = time.GetUtcNow();
+        var end = started + Lifetime;
+        var nextPing = started + PingInterval;
+        DateTimeOffset? lastChanged = null;
+        var pending = false;
+        var wasClosed = PollState.IsClosed(poll, started);
+
+        // Sent at once: flushes the headers (the browser's open event) and sets the reconnection interval.
+        yield return Item(PingEvent);
+
+        while (!ct.IsCancellationRequested && !sub.Ended)
         {
-            var started = time.GetUtcNow();
-            var end = started + Lifetime;
-            var nextPing = started + PingInterval;
-            DateTimeOffset? lastChanged = null;
-            var pending = false;
-            var wasClosed = PollState.IsClosed(poll, started);
-
-            // Sent at once: flushes the headers (the browser's open event) and sets the reconnection interval.
-            yield return Item(PingEvent);
-
-            while (!ct.IsCancellationRequested && !sub.Ended)
+            var now = time.GetUtcNow();
+            if (now >= end) yield break;
+            // A close by its date makes no write: announce it once when it passes.
+            if (!wasClosed && PollState.IsClosed(poll, now))
             {
-                var now = time.GetUtcNow();
-                if (now >= end) yield break;
-                // A close by its date makes no write: announce it once when it passes.
-                if (!wasClosed && PollState.IsClosed(poll, now))
-                {
-                    wasClosed = true;
-                    pending = true;
-                }
-
-                var changeDue = pending && (lastChanged is not { } last || now >= last + MinChangeInterval);
-                if (changeDue || now >= nextPing)
-                {
-                    if (await check.RunAsync(ct) is not { } fresh || sub.Ended) yield break;
-                    // Close date or close state may have changed with the write that triggered this.
-                    poll = fresh;
-                    wasClosed = PollState.IsClosed(poll, now);
-                    if (changeDue)
-                    {
-                        pending = false;
-                        lastChanged = now;
-                        yield return Item(ChangedEvent);
-                    }
-                    else
-                    {
-                        yield return Item(PingEvent);
-                    }
-                    nextPing = now + PingInterval;
-                    continue;
-                }
-
-                var wake = Min(end, nextPing);
-                if (pending && lastChanged is { } l) wake = Min(wake, l + MinChangeInterval);
-                if (!wasClosed && poll.ClosesAt is { } closes) wake = Min(wake, closes);
-                var signalled = await WaitAsync(sub, wake - now, pending, time, ct);
-                if (signalled) pending = true;
+                wasClosed = true;
+                pending = true;
             }
-        }
-        finally
-        {
-            sub.Dispose();
+
+            var changeDue = pending && (lastChanged is not { } last || now >= last + MinChangeInterval);
+            if (changeDue || now >= nextPing)
+            {
+                if (await check.RecheckAsync(ct) is not { } fresh || sub.Ended) yield break;
+                // Close date or close state may have changed with the write that triggered this.
+                poll = fresh;
+                wasClosed = PollState.IsClosed(poll, now);
+                if (changeDue)
+                {
+                    pending = false;
+                    lastChanged = now;
+                    yield return Item(ChangedEvent);
+                }
+                else
+                {
+                    yield return Item(PingEvent);
+                }
+                nextPing = now + PingInterval;
+                continue;
+            }
+
+            var wake = Min(end, nextPing);
+            if (pending && lastChanged is { } l) wake = Min(wake, l + MinChangeInterval);
+            if (!wasClosed && poll.ClosesAt is { } closes) wake = Min(wake, closes);
+            var signalled = await WaitAsync(sub, wake - now, pending, time, ct);
+            if (signalled) pending = true;
         }
     }
 
@@ -180,7 +173,7 @@ public static class LiveResultsEndpoint
     /// </summary>
     private sealed class AccessCheck(string encodedId, string userId, bool admin, IPAddress? address, string? stamp,
         IDbContextFactory<ApplicationDbContext> dbFactory, PollAccessService access, AbuseTracker abuse, BlockedRangeService ranges,
-        TimeProvider time)
+        TimeProvider time, ILogger logger)
     {
         public async Task<Poll?> RunAsync(CancellationToken ct)
         {
@@ -198,6 +191,24 @@ public static class LiveResultsEndpoint
             }
             catch (OperationCanceledException)
             {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// <see cref="RunAsync"/> once the response has started: a database error (a PostgreSQL restart, a locked SQLite file)
+        /// ends the stream quietly, as a failed check would; the browser reconnects and is checked again.
+        /// </summary>
+        public async Task<Poll?> RecheckAsync(CancellationToken ct)
+        {
+            try
+            {
+                return await RunAsync(ct);
+            }
+            catch (Exception e) when (DatabaseErrors.IsDatabaseError(e))
+            {
+                logger.LogInformation("Live results stream ended: the access check could not reach the database ({Error}).",
+                    DatabaseErrors.Describe(e));
                 return null;
             }
         }
