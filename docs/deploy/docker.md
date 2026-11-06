@@ -7,7 +7,8 @@ Security notes: [security.md](security.md). Behind Nginx Proxy Manager with Post
 
 ## Install
 
-Release image (linux/amd64 and linux/arm64): `ghcr.io/<owner>/telrang:<version>`, also `:latest`. Verify it:
+Release image (linux/amd64 and linux/arm64): `ghcr.io/<owner>/telrang:<version>`, also `:latest` (the newest full
+release) and `:next` (the newest build, release candidates included). Verify it:
 `gh attestation verify oci://ghcr.io/<owner>/telrang:<version> --owner <owner>`.
 
 ```sh

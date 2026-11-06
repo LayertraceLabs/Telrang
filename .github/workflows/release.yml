@@ -312,14 +312,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # No rebuild: the version tags point at the digest the docker job tested. A pre-release (1.2.0-rc.1) does not move
-      # :latest.
+      # No rebuild: the version tags point at the digest the docker job tested. Every release moves :next (the newest
+      # build, pre-releases included); only a full release moves :latest.
       - name: Tag the tested image
         env:
           NAME: ${{ needs.docker.outputs.name }}
           DIGEST: ${{ needs.docker.outputs.digest }}
         run: |
-          tags=(-t "$NAME:$VERSION")
+          tags=(-t "$NAME:$VERSION" -t "$NAME:next")
           case "$VERSION" in *-*) ;; *) tags+=(-t "$NAME:latest") ;; esac
           docker buildx imagetools create "${tags[@]}" "$NAME@$DIGEST"
           docker buildx imagetools inspect "$NAME:$VERSION" | grep -F "$DIGEST"
