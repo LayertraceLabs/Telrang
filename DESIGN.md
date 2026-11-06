@@ -1524,6 +1524,10 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   v0.3.0-rc.4 (not published): the same race on the vote page's lazy imports (`sortable.esm.js` via ranking.js),
   which start after `readyState` is complete; vote.js now marks `<html data-enhancing>` while they load and the
   harness's `loaded()` waits for it to go.
+- 2026-11-06 (public repository): `main` is protected by a ruleset (pull request, required checks `build-test`, `e2e`,
+  `web-tests-postgres`, no force push or deletion). Dependabot updates without a major bump merge by themselves once
+  those pass. Every release also moves the image tag `:next`, so a deployment that follows release candidates re-pulls
+  one tag; `:latest` stays for full releases. README badges: CI on `main`, newest release, licence, .NET.
 
 - 2026-11-05 (request limits): every request gets small body and form limits. Kestrel refuses bodies over 256 kB (four
   times the vote form's 64 kB, the largest HTTP form; the editor and branding go over the circuit); forms allow at most
@@ -2733,7 +2737,8 @@ support answers carry over.
   data directory, checked at startup with a warning). With PostgreSQL on another host, the database and the key
   ring no longer share a machine; the deploy notes recommend that split and say what each part alone reveals.
 - **Release contents** (built by CI on a `v*` tag; `scripts/publish-release.sh` builds the same locally):
-  - Docker: multi-arch image (linux/amd64, linux/arm64) on GHCR, `ghcr.io/<owner>/telrang:<version>` and `:latest`;
+  - Docker: multi-arch image (linux/amd64, linux/arm64) on GHCR, `ghcr.io/<owner>/telrang:<version>`, `:latest` (full
+    releases) and `:next` (every release, pre-releases included);
     compose file as now.
   - Linux: `telrang-<version>-linux-x64.tar.gz` and `-linux-arm64.tar.gz`, self-contained (no .NET install
     needed), with `telrang.service` (own system user `telrang`, `StateDirectory=telrang`, `ConfigurationDirectory=telrang`,
@@ -2754,7 +2759,9 @@ support answers carry over.
   run the same steps locally. The workflow also checks the archive set, the version stamped in every
   `Telrang.Web.dll` and that the footer of every install format shows the tag's version and commit.
 - **Other workflows**: `ci.yml` (build, format, tests on both providers, e2e), `codeql.yml` (CodeQL, skipped while the
-  repository is private), Dependabot (`.github/dependabot.yml`: NuGet, Actions, the Docker base images).
+  repository is private), Dependabot (`.github/dependabot.yml`: NuGet, Actions, the Docker base images;
+  `dependabot-automerge.yml` turns on auto-merge for every update but a major version bump, so it lands once the
+  checks the `main` ruleset requires pass).
 - **Upgrades** are the same everywhere: stop, replace the program (folder, archive or image), start; migrations run at
   start. The deploy notes give the commands per format.
 - **Documentation**: `docs/deploy/` with one page per format (`docker.md`, `linux.md`, `windows.md`) sharing the
