@@ -210,9 +210,9 @@ jobs:
           if (Get-Service -Name Telrang -ErrorAction SilentlyContinue) { throw 'service still there' }
           if (-not (Test-Path 'C:\ProgramData\Telrang\data\app.db')) { throw 'data was removed' }
 
-  # The image for both architectures, built once and pushed under a CI tag; the amd64 one is pulled back by digest and
-  # tested (HEALTHCHECK, e2e). publish-image tags exactly that digest (pentest R3-DEP-12e: the shipped image is the
-  # tested one, byte for byte).
+  # The image for both architectures, built once and pushed to the staging package (telrang-ci, private); the amd64 one
+  # is pulled back by digest and tested (HEALTHCHECK, e2e). publish-image copies exactly that digest into the public
+  # package: the shipped image is the tested one, byte for byte, and a failed run leaves nothing there.
   docker:
     needs: archives
     runs-on: ubuntu-latest
@@ -226,14 +226,17 @@ jobs:
       COMMIT: ${{ needs.archives.outputs.commit }}
     outputs:
       name: ${{ steps.image.outputs.name }}
+      staging: ${{ steps.image.outputs.staging }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: image
-        name: Image name (GHCR wants lower case)
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telrang" >> "$GITHUB_OUTPUT"
+        name: Image names (GHCR wants lower case)
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telrang" >> "$GITHUB_OUTPUT"
+          echo "staging=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telrang-ci" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
@@ -241,22 +244,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: build
-        name: Build both architectures and push under the CI tag
+        name: Build both architectures and push to the staging package
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          # The image's provenance is the GitHub attestation publish-image makes; BuildKit's own would add an untagged
+          # manifest per architecture to the package.
+          provenance: false
           build-args: |
             VERSION=${{ env.VERSION }}
             COMMIT=${{ env.COMMIT }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          tags: ${{ steps.image.outputs.name }}:ci-${{ github.sha }}
+          tags: ${{ steps.image.outputs.staging }}:${{ github.sha }}
       - name: Pull the pushed linux/amd64 image by digest
         env:
-          NAME: ${{ steps.image.outputs.name }}
+          NAME: ${{ steps.image.outputs.staging }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           docker pull --platform linux/amd64 "$NAME@$DIGEST"
@@ -312,16 +318,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # No rebuild: the version tags point at the digest the docker job tested. Every release moves :next (the newest
+      # No rebuild: the tested image is copied from the staging package (telrang-ci, private) into the public one under
+      # its version tags, same digest, so the public package holds released images only. Every release moves :next (the newest
       # build, pre-releases included); only a full release moves :latest.
       - name: Tag the tested image
         env:
           NAME: ${{ needs.docker.outputs.name }}
+          STAGING: ${{ needs.docker.outputs.staging }}
           DIGEST: ${{ needs.docker.outputs.digest }}
         run: |
           tags=(-t "$NAME:$VERSION" -t "$NAME:next")
           case "$VERSION" in *-*) ;; *) tags+=(-t "$NAME:latest") ;; esac
-          docker buildx imagetools create "${tags[@]}" "$NAME@$DIGEST"
+          docker buildx imagetools create "${tags[@]}" "$STAGING@$DIGEST"
           docker buildx imagetools inspect "$NAME:$VERSION" | grep -F "$DIGEST"
       # GitHub stores attestations only for public repositories (or paid plans): skipped while private.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
