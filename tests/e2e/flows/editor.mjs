@@ -11,6 +11,9 @@ async function newEditor(page) {
 }
 
 async function create(page) {
+  // The last change's re-render may still be on its way (a results choice adds rows above the button): a pointer
+  // click aimed before it lands misses the moved button.
+  await page.interactive();
   await page.clickText('Create poll', 'button');
   await page.waitFor(`/^\\/polls\\/[^/]+\\/share$/.test(location.pathname)`, 'the share page after Create poll', 20_000);
   await page.interactive();
