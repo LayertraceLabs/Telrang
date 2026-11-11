@@ -1528,6 +1528,11 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   `web-tests-postgres`, no force push or deletion). Dependabot updates without a major bump merge by themselves once
   those pass. Every release also moves the image tag `:next`, so a deployment that follows release candidates re-pulls
   one tag; `:latest` stays for full releases. README badges: CI on `main`, newest release, licence, .NET.
+- 2026-11-11 (image packages): the release's docker job pushes the image it tests to a staging package
+  (`ghcr.io/<owner>/telrang-ci:<sha>`, private) and `publish-image` copies the tested digest into
+  `ghcr.io/<owner>/telrang`. Before, the test image went into the public package as `ci-<sha>`, so every failed release
+  run left a version there. BuildKit's own provenance manifests are off (the GitHub attestation covers provenance), so
+  a release adds one tagged index, its two per-architecture manifests and the attestation, nothing else.
 
 - 2026-11-05 (request limits): every request gets small body and form limits. Kestrel refuses bodies over 256 kB (four
   times the vote form's 64 kB, the largest HTTP form; the editor and branding go over the circuit); forms allow at most
