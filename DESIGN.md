@@ -1533,6 +1533,9 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   `ghcr.io/<owner>/telrang`. Before, the test image went into the public package as `ci-<sha>`, so every failed release
   run left a version there. BuildKit's own provenance manifests are off (the GitHub attestation covers provenance), so
   a release adds one tagged index, its two per-architecture manifests and the attestation, nothing else.
+- 2026-11-11 (upgrade test): `MigrationUpgradeTests` runs the upgraded app on a clock an hour after the fixture's
+  `GeneratedAt`. On the real clock the test failed from the fixture's 8th day on: its queued mail was past the 7-day
+  limit and no longer sent.
 
 - 2026-11-05 (request limits): every request gets small body and form limits. Kestrel refuses bodies over 256 kB (four
   times the vote form's 64 kB, the largest HTTP form; the editor and branding go over the circuit); forms allow at most

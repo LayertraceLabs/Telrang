@@ -80,7 +80,7 @@ public class MigrationUpgradeTests
         {
             Assert.Equal(manifest.SqliteSchema, await LastSqliteMigrationAsync(Path.Combine(dir, "app.db")));
             var onSqlite = new Dictionary<string, string?> { ["App:DataDir"] = dir, ["Database:Provider"] = "Sqlite", ["ConnectionStrings:Default"] = "" };
-            await using var app = new AppFactory(onSqlite, registrationOpen: false);
+            await using var app = new AppFactory(onSqlite, UpgradeDay(manifest), registrationOpen: false);
             await VerifyAsync(app, manifest);
         }
         finally
@@ -111,7 +111,7 @@ public class MigrationUpgradeTests
             }
             File.Delete(Path.Combine(dir, "app.db")); // the PostgreSQL instance has no SQLite file; only the data directory's keys
             var onPostgres = new Dictionary<string, string?> { ["App:DataDir"] = dir, ["Database:Provider"] = "Postgres", ["ConnectionStrings:Default"] = cs };
-            await using var app = new AppFactory(onPostgres, registrationOpen: false);
+            await using var app = new AppFactory(onPostgres, UpgradeDay(manifest), registrationOpen: false);
             await VerifyAsync(app, manifest);
         }
         finally
@@ -163,6 +163,13 @@ public class MigrationUpgradeTests
         cmd.CommandText = "SELECT \"MigrationId\" FROM \"__EFMigrationsHistory\" ORDER BY \"MigrationId\" DESC LIMIT 1";
         return (string)(await cmd.ExecuteScalarAsync())!;
     }
+
+    /// <summary>
+    /// The upgrade happens an hour after the fixture was made, whenever the test runs: what the fixture holds ages (queued
+    /// mail is dropped after 7 days), and the test is about the upgrade, not about that.
+    /// </summary>
+    private static Action<IServiceCollection> UpgradeDay(UpgradeManifest m) =>
+        s => s.AddSingleton<TimeProvider>(new TestUtil.MutableTime(m.GeneratedAt.AddHours(1)));
 
     /// <summary>The checks, the same on both providers. The app has started on the fixture: migrations and startup steps ran.</summary>
     private static async Task VerifyAsync(AppFactory app, UpgradeManifest m)
