@@ -9,7 +9,7 @@
 # every architecture included), so no emulation is needed. The final stage has no RUN step for the same reason.
 # Base images pinned by digest (pentest R3-DEP-12e): a rebuild uses the same bytes; update the digests on purpose
 # (docker buildx imagetools inspect mcr.microsoft.com/dotnet/sdk:10.0, .../aspnet:10.0).
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:11.0@sha256:65f3c7c6a25a239ab3e6719f2896147e7b68242ff2d8818dd70498bde6ef8bea AS build
 ARG VERSION=0.0.0
 ARG COMMIT=unknown
 WORKDIR /src
@@ -29,7 +29,7 @@ RUN dotnet publish src/Telrang.Web/Telrang.Web.csproj \
     && mkdir -p /app/data/keys
 
 # ---- runtime --------------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee AS final
+FROM mcr.microsoft.com/dotnet/aspnet:11.0@sha256:bc0d6653979efba491ab3d6f589d691f96c309c3c3ef81325efa6978e7b7f242 AS final
 ARG VERSION=0.0.0
 ARG COMMIT=unknown
 LABEL org.opencontainers.image.title="Telrang" \
