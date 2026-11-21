@@ -1,5 +1,5 @@
 # Weekly update PRs, one grouped PR per ecosystem. The Docker base images are pinned by digest (docker/Dockerfile);
-# Dependabot moves the digest within the 10.0 tags.
+# Dependabot moves the digest within the 11.0 tags.
 version: 2
 updates:
   - package-ecosystem: nuget

@@ -117,8 +117,10 @@ public static class PollRules
     private static bool TryDate(string s, out DateOnly d) =>
         DateOnly.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d);
 
+    // .NET 11 reads "24:00" as midnight; here it stays an error (00:00 of the next day is the way to write it).
     private static bool TryTime(string s, out TimeOnly t) =>
-        TimeOnly.TryParseExact(s, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out t);
+        TimeOnly.TryParseExact(s, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out t)
+        && !s.StartsWith("24", StringComparison.Ordinal);
 
     /// <summary>Parses one dates item (§18.1) into one slot per day, or the error message.</summary>
     public static bool TryParseDateItem(string text, int optionsMax, out List<DateSlot> slots, out string? error)

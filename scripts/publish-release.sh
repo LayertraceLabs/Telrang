@@ -16,7 +16,7 @@
 #   SHA256SUMS
 # The version is stamped into the assemblies (page footer). Builds are deterministic (ContinuousIntegrationBuild: no local
 # paths in the binaries); archive entries carry the commit time, root ownership and fixed modes.
-# Needs: .NET 10 SDK, GNU tar, gzip, python3 (zip), sha256sum.
+# Needs: .NET 11 SDK, GNU tar, gzip, python3 (zip), sha256sum.
 set -eu
 cd "$(dirname "$0")/.."
 

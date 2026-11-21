@@ -21,7 +21,7 @@ live results stream, §21.2.)
 
 | Concern | Choice | Why |
 |---|---|---|
-| Runtime | .NET 10, ASP.NET Core | Current LTS |
+| Runtime | .NET 11, ASP.NET Core | Current release; moved from 10 before the first public release (both end support 2028-11) |
 | UI | Blazor Web App, **Interactive Server** render mode, global | One project, no API layer, secrets stay server-side. Drag-and-drop via JS interop. |
 | Drag and drop | SortableJS (vendored, pinned, SRI hash) | HTML5 DnD does not work on touch; SortableJS does. Always offer up/down buttons as fallback. |
 | Data | EF Core 10 + SQLite (default), or PostgreSQL (`Npgsql.EntityFrameworkCore.PostgreSQL`, §28) chosen by environment variable | SQLite = zero-config Docker. PostgreSQL for many concurrent votes or reporting tools; two migration sets, one model. |
@@ -1004,7 +1004,7 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
     <date>" (for an open poll: from its close date).
   - Results on phones: below 576 px the ranked and points results render one card per option (label, total or
     score with its bar, the stats on one line, the histogram below) instead of the wide table.
-  - CI: `.github/workflows/ci.yml` (restore, `build --no-incremental -warnaserror`, test; ubuntu-latest, .NET 10).
+  - CI: `.github/workflows/ci.yml` (restore, `build --no-incremental -warnaserror`, test; ubuntu-latest, .NET 11).
     `dotnet format --verify-no-changes` runs in CI since 2026-11-01 (`.editorconfig` at the root; migrations are
     generated code and skipped).
 
@@ -1536,6 +1536,9 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
 - 2026-11-11 (upgrade test): `MigrationUpgradeTests` runs the upgraded app on a clock an hour after the fixture's
   `GeneratedAt`. On the real clock the test failed from the fixture's 8th day on: its queued mail was past the 7-day
   limit and no longer sent.
+- 2026-11-21 (.NET 11): the app targets .NET 11 with the 11.0 packages (EF Core, Npgsql provider, Identity, hosting)
+  and MailKit 5, before the first public release, so 0.3.0 does not start one framework behind. .NET 10 and 11 end
+  support on the same day (2028-11-14), so staying on 10 bought no extra time. No model change, no new migration.
 
 - 2026-11-05 (request limits): every request gets small body and form limits. Kestrel refuses bodies over 256 kB (four
   times the vote form's 64 kB, the largest HTTP form; the editor and branding go over the circuit); forms allow at most

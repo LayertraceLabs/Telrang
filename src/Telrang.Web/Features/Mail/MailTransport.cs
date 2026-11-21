@@ -40,7 +40,7 @@ public sealed class SmtpMailTransport : IMailTransport
                 throw new InvalidOperationException("SMTP login without TLS is refused. Pick STARTTLS or implicit TLS.");
             await client.AuthenticateAsync(settings.Username, password ?? "", ct);
         }
-        await client.SendAsync(message, ct);
+        await client.SendAsync(new MailKit.SendRequest(message), ct);
         await client.DisconnectAsync(quit: true, ct);
     }
 }
