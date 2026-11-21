@@ -3,7 +3,7 @@
 [![CI](https://github.com/LayertraceLabs/Telrang/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LayertraceLabs/Telrang/actions/workflows/ci.yml?query=branch%3Amain)
 [![Release](https://img.shields.io/github/v/release/LayertraceLabs/Telrang?include_prereleases&sort=semver)](https://github.com/LayertraceLabs/Telrang/releases)
 [![License: AGPL-3.0](https://img.shields.io/github/license/LayertraceLabs/Telrang)](LICENSE)
-[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
+[![.NET 11](https://img.shields.io/badge/.NET-11-512BD4)](https://dotnet.microsoft.com/)
 
 Telrang (Dutch *tel*, count, and *rang*, rank) is a self-hosted voting app for friends, family, clubs and schools: an
 independent alternative to ad-funded poll services. One container, one SQLite file, no tracking.
@@ -17,7 +17,7 @@ independent alternative to ad-funded poll services. One container, one SQLite fi
 - **Security:** 2FA for accounts, passkeys, rate limits, a strict Content Security Policy, and no client IP
   addresses written to disk.
 
-Built with .NET 10 (Blazor), EF Core and SQLite, or PostgreSQL for busy instances (DESIGN.md §28, deploy notes "PostgreSQL").
+Built with .NET 11 (Blazor), EF Core and SQLite, or PostgreSQL for busy instances (DESIGN.md §28, deploy notes "PostgreSQL").
 
 ## Running it
 
