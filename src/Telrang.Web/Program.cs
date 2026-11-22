@@ -348,6 +348,7 @@ if (ReverseProxy.HttpsEndpointConfigured(config))
 
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseRouting();
+app.UseMiddleware<CrossSiteRequestMiddleware>(); // before every limit and signal: another site cannot spend a visitor's (DESIGN.md §31)
 app.UseMiddleware<AbuseBlockMiddleware>();
 app.UseRateLimiter();
 app.UseMiddleware<HeavyGetMiddleware>(); // results page and CSVs: per-client and total concurrency (DESIGN.md §31)

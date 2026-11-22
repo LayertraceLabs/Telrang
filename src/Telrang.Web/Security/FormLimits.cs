@@ -81,7 +81,9 @@ public sealed class FormLimitMiddleware(RequestDelegate next)
         {
             // Read (and cache) the form here, under the limits, so a refusal is this page and not antiforgery's
             // "Form expired". Only for a request something will read it for.
-            if (first && !hub && http.GetEndpoint() is not null && HttpMethods.IsPost(http.Request.Method) && http.Request.HasFormContentType)
+            // Not after a failed cross-origin verdict (.NET 11): reading the form then throws; antiforgery refuses it below.
+            var refused = http.Features.Get<Microsoft.AspNetCore.Antiforgery.IAntiforgeryValidationFeature>() is { IsValid: false };
+            if (first && !hub && !refused && http.GetEndpoint() is not null && HttpMethods.IsPost(http.Request.Method) && http.Request.HasFormContentType)
                 await http.Request.ReadFormAsync(http.RequestAborted);
             await next(http);
         }
