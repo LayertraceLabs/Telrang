@@ -127,7 +127,7 @@ public class BallotsViewTests
         var id = await CreatePollAsync(factory, owner, PointsDraft(ResultsVisibility.AfterVote, VoterMode.Invite));
         var invite = (await WithScope(factory, sp => sp.GetRequiredService<PollService>().GenerateInvitesAsync(owner, id, 1, [Alias])))!.Single();
         Assert.True(InviteTokens.TryHash(invite.Token, out var hash));
-        Assert.True((await SubmitPointsAsync(factory, id, new VisitorContext(null, null, hash), new() { ["rome"] = 10 }, "Ann")).Succeeded);
+        Assert.True((await SubmitPointsAsync(factory, id, new VisitorContext(null, null, hash), new() { ["rome"] = 10 }, "Ann B.")).Succeeded);
 
         // Without Show ballots: no link, and asking for the view shows the summary.
         var (browser, _) = factory.CreateBrowserWithJar();
@@ -137,7 +137,7 @@ public class BallotsViewTests
         Assert.DoesNotContain("view=ballots", summary);
         var asked = await PageAsync(browser, $"/p/{id}/results?view=ballots");
         Assert.DoesNotContain("ballots-points", asked);
-        Assert.DoesNotContain("Ann", asked);
+        Assert.DoesNotContain("Ann B.", asked); // a name no random token on the page can contain
         Assert.DoesNotContain(Alias, asked);
         Assert.DoesNotContain("Summary<", asked);
     }
