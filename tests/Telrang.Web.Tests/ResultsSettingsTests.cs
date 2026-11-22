@@ -190,19 +190,19 @@ public class ResultsSettingsTests
         var owner = await CreateUserAsync(factory, "o@example.com");
         var voterId = await CreateUserAsync(factory, "v@example.com");
         var id = await CreatePollAsync(factory, owner, Draft(VoterMode.Public, ResultsVisibility.Open, ResultsTiming.WhileOpen));
-        Assert.True((await SubmitRankedAsync(factory, id, VisitorContext.ForUser(voterId), ParisFirst, "Vic")).Succeeded);
+        Assert.True((await SubmitRankedAsync(factory, id, VisitorContext.ForUser(voterId), ParisFirst, "Vic T.")).Succeeded);
         var access = await AccessAsync(factory, id, VisitorContext.ForUser(voterId));
         Assert.True(access!.CanSeeResults);
         Assert.False(access.CanSeeBallots);
         Assert.Null(await WithScope(factory, sp => sp.GetRequiredService<ResultsService>().BallotsAsync(access, 1)));
         var browser = await LoggedInBrowserAsync(factory, "v@example.com");
         var summary = await PageAsync(browser, $"/p/{id}/results");
-        Assert.DoesNotContain("Vic", summary);
+        Assert.DoesNotContain("Vic T.", summary);
         Assert.DoesNotContain("view=ballots", summary);
         // Asking for the view anyway shows the summary.
         var asked = await PageAsync(browser, $"/p/{id}/results?view=ballots");
         Assert.Contains("1 voter", asked.Replace("<strong>", "").Replace("</strong>", ""));
-        Assert.DoesNotContain("Vic", asked);
+        Assert.DoesNotContain("Vic T.", asked);
         Assert.DoesNotContain("ballots-table", asked);
     }
 

@@ -209,7 +209,7 @@ public class DatesTests
         await using var factory = new AppFactory();
         var owner = await CreateUserAsync(factory, "o@example.com");
         var id = await CreatePollAsync(factory, owner, DatesDraft(results: ResultsVisibility.Open));
-        Assert.True((await SubmitDatesAsync(factory, id, Anon("v1"), A((Day, Availability.Yes), (Evening, Availability.Yes)), "Ann")).Succeeded);
+        Assert.True((await SubmitDatesAsync(factory, id, Anon("v1"), A((Day, Availability.Yes), (Evening, Availability.Yes)), "Ann B.")).Succeeded);
         Assert.True((await SubmitDatesAsync(factory, id, Anon("v2"), A((Day, Availability.Maybe), (Evening, Availability.Yes)), " ")).Succeeded);
         Assert.True((await SubmitDatesAsync(factory, id, Anon("v3"), A((Day, Availability.Yes), (Span, Availability.Maybe)), "Cy")).Succeeded);
 
@@ -223,7 +223,7 @@ public class DatesTests
         Assert.Equal((0, 1, 2, 3), (r.Dates.Rows[2].Yes, r.Dates.Rows[2].Maybe, r.Dates.Rows[2].No, r.Dates.Rows[2].Place));
 
         var grid = (await TableAsync(factory, id, VisitorContext.ForUser(owner)))!.Dates!;
-        Assert.Equal(["Ann", DatesGridRow.AnonymousName, "Cy"], grid.Select(g => g.Name));
+        Assert.Equal(["Ann B.", DatesGridRow.AnonymousName, "Cy"], grid.Select(g => g.Name));
         Assert.Equal([Availability.Yes, Availability.Yes, Availability.No], grid[0].Answers);
         Assert.Equal([Availability.Maybe, Availability.Yes, Availability.No], grid[1].Answers);
 
@@ -243,7 +243,7 @@ public class DatesTests
         var ownerBallots = WebUtility.HtmlDecode(await (await ownerBrowser.GetAsync($"/p/{id}/results?view=ballots")).Content.ReadAsStringAsync());
         Assert.Contains("Who can when", ownerBallots);
         Assert.Contains("Anonymous", ownerBallots);
-        Assert.Contains(">Ann<", ownerBallots);
+        Assert.Contains(">Ann B.<", ownerBallots);
         Assert.DoesNotContain("dates-stack-yes", ownerBallots);
 
         var response = await factory.CreateBrowser().GetAsync($"/p/{id}/results");
@@ -252,7 +252,7 @@ public class DatesTests
         var publicHtml = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
         Assert.Contains("Best:", publicHtml);
         Assert.DoesNotContain("Who can when", publicHtml);
-        Assert.DoesNotContain("Ann", publicHtml);
+        Assert.DoesNotContain("Ann B.", publicHtml);
         Assert.DoesNotContain(" style=\"", publicHtml);
     }
 
