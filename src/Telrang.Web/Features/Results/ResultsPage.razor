@@ -154,7 +154,9 @@
     [CascadingParameter] private HttpContext Http { get; set; } = default!;
 
     /// <summary>The page of the ballot table (DESIGN.md §31), 1-based; anything else reads as the nearest page.</summary>
-    [SupplyParameterFromQuery(Name = ResultsQuery.Rows)] public int? RowsPage { get; set; }
+    // Text, not int?: a value that is no number is page 1, not a binding error (500).
+    [SupplyParameterFromQuery(Name = ResultsQuery.Rows)] public string? RowsText { get; set; }
+    private int RowsPage => int.TryParse(RowsText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) && n > 0 ? n : 1;
 
     /// <summary><c>ballots</c> for the ballots view (DESIGN.md §33); anything else, or a viewer it refuses, is the summary.</summary>
     [SupplyParameterFromQuery(Name = ResultsQuery.View)] public string? View { get; set; }
@@ -190,7 +192,7 @@
         if (!access.CanSeeResults) { Http.Response.StatusCode = StatusCodes.Status403Forbidden; return; }
         var computed = await ResultsService.ComputeAsync(access, Http.RequestAborted);
         if (string.Equals(View, ResultsQuery.BallotsView, StringComparison.Ordinal))
-            ballots = await ResultsService.BallotsAsync(access, RowsPage ?? 1, Http.RequestAborted);
+            ballots = await ResultsService.BallotsAsync(access, RowsPage, Http.RequestAborted);
         results = computed;
         computedAt = Time.GetUtcNow();
     }
