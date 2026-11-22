@@ -1544,6 +1544,15 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   a second Advanced snippet for that case: `real_ip_header CF-Connecting-IP` with Cloudflare's ranges as the only
   `set_real_ip_from`. The app is unchanged (it still trusts one hop from NPM); `scripts/npm-stack-test.sh` checks the
   snippet's mechanism with a stand-in range.
+- 2026-11-22 (cross-site requests): `CrossSiteRequestMiddleware` runs right after routing, before the abuse block and
+  the rate limiter. A request another site makes a browser send (Fetch Metadata `Sec-Fetch-Site` other than
+  `same-origin`/`none`; without that header, an unsafe method with a foreign `Origin`, judged as for `/_blazor`) gets a
+  403 page, counts against no limit and records no abuse signal. A top-level GET navigation (a link) passes, framed
+  navigations do not; clients that send neither header pass; endpoints with `AbuseExempt` are not checked. Two reasons.
+  .NET 11 adds its own cross-origin verdict and throws when the form is read after a failed one, so every cross-site
+  POST was a 500 with three `fail` lines. And any web page could make a visitor's browser post until the visitor's
+  address was limited and then blocked here. `FormLimitMiddleware` also skips its form read after a failed verdict.
+- 2026-11-22 (results rows): `?rows=` is read as text; no number means page 1. As `int?` a bad value was a 500.
 
 - 2026-11-05 (request limits): every request gets small body and form limits. Kestrel refuses bodies over 256 kB (four
   times the vote form's 64 kB, the largest HTTP form; the editor and branding go over the circuit); forms allow at most
