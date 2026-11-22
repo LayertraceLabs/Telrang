@@ -226,6 +226,52 @@ publishes ports past `ufw` (it writes its own iptables rules), so a `"81:81"` wo
 NPM's admin a long password: the Telrang container shares a network with NPM and could reach port 81 there if it were
 ever taken over.
 
+### Behind Cloudflare
+
+With Cloudflare's proxy (orange cloud) in front, every outside visitor reaches NPM from one of Cloudflare's addresses.
+With the Advanced line above, Telrang then sees those few addresses for everyone: visitors share rate limits, and one
+automatic block shuts out all of them. Replace the Advanced line with this one, which takes the visitor from
+Cloudflare's own header, from Cloudflare's ranges only:
+
+```nginx
+real_ip_header CF-Connecting-IP;
+set_real_ip_from 173.245.48.0/20;
+set_real_ip_from 103.21.244.0/22;
+set_real_ip_from 103.22.200.0/22;
+set_real_ip_from 103.31.4.0/22;
+set_real_ip_from 141.101.64.0/18;
+set_real_ip_from 108.162.192.0/18;
+set_real_ip_from 190.93.240.0/20;
+set_real_ip_from 188.114.96.0/20;
+set_real_ip_from 197.234.240.0/22;
+set_real_ip_from 198.41.128.0/17;
+set_real_ip_from 162.158.0.0/15;
+set_real_ip_from 104.16.0.0/13;
+set_real_ip_from 104.24.0.0/14;
+set_real_ip_from 172.64.0.0/13;
+set_real_ip_from 131.0.72.0/22;
+set_real_ip_from 2400:cb00::/32;
+set_real_ip_from 2606:4700::/32;
+set_real_ip_from 2803:f800::/32;
+set_real_ip_from 2405:b500::/32;
+set_real_ip_from 2405:8100::/32;
+set_real_ip_from 2a06:98c0::/29;
+set_real_ip_from 2c0f:f248::/32;
+```
+
+- The list is <https://www.cloudflare.com/ips/> as of 2026-11; compare it once a year. A missing range only means its
+  visitors share a bucket again.
+- Cloudflare sets `CF-Connecting-IP` itself and overwrites what a client sends. A client that reaches NPM directly (your
+  LAN, or the origin address if it is open) is outside the ranges: its header is ignored and its own address counts.
+- Anyone can point their own Cloudflare zone at your origin address. Allow ports 80/443 from Cloudflare's ranges (and
+  your LAN) only, or use a Cloudflare Tunnel, so Cloudflare's rules and yours cannot be stepped around.
+- Leave Cloudflare's "Pseudo IPv4" off or on "Add header": "Overwrite headers" replaces the address of IPv6 visitors.
+
+Check from outside: 14 quick `POST`s to `/Account/Login` end in `429`; right after, a
+request from another network is not limited.
+`scripts/npm-stack-test.sh` tests the mechanism with a stand-in range. Another CDN works the same way with its header
+and ranges.
+
 ### Outbound traffic (optional)
 
 The `egress` network has a fixed subnet (`172.31.255.16/29`) so a host firewall rule can limit what the app may reach.

@@ -1539,6 +1539,11 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
 - 2026-11-21 (.NET 11): the app targets .NET 11 with the 11.0 packages (EF Core, Npgsql provider, Identity, hosting)
   and MailKit 5, before the first public release, so 0.3.0 does not start one framework behind. .NET 10 and 11 end
   support on the same day (2028-11-14), so staying on 10 bought no extra time. No model change, no new migration.
+- 2026-11-22 (behind a CDN): with NPM behind Cloudflare the documented `set_real_ip_from unix:;` made every outside
+  visitor one of Cloudflare's addresses (shared rate limits and blocks; seen on a live instance). The deploy notes get
+  a second Advanced snippet for that case: `real_ip_header CF-Connecting-IP` with Cloudflare's ranges as the only
+  `set_real_ip_from`. The app is unchanged (it still trusts one hop from NPM); `scripts/npm-stack-test.sh` checks the
+  snippet's mechanism with a stand-in range.
 
 - 2026-11-05 (request limits): every request gets small body and form limits. Kestrel refuses bodies over 256 kB (four
   times the vote form's 64 kB, the largest HTTP form; the editor and branding go over the circuit); forms allow at most
