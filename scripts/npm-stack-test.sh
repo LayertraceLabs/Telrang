@@ -300,6 +300,30 @@ for i in $(seq 1 5); do codes+=$(code -X POST -H "X-Real-IP: 192.0.2.$i" "$H/Acc
 check "6.10 control: without set_real_ip_from in the host, a forged X-Real-IP is a new client (400s)" \
   "$(t is "$codes" '400 400 400 400 400 ')" "$codes"
 
+# Behind a CDN (docs/deploy/docker.md, "Behind Cloudflare"): NPM takes the visitor from the CDN's header, from the CDN's
+# ranges only. This script's requests arrive from the proxy network's gateway, which stands in for the CDN here; NPM's
+# own loopback is a client that is not the CDN.
+curl -sf -X PUT "$api/nginx/proxy-hosts/$host_id" "${auth[@]}" -H 'Content-Type: application/json' \
+  -d "{\"advanced_config\": \"real_ip_header CF-Connecting-IP;\\nset_real_ip_from $proxy_subnet;\"}" >/dev/null
+sleep 3
+codes=
+for i in $(seq 1 12); do codes+=$(code -X POST -H "CF-Connecting-IP: 203.0.113.$i" "$H/Account/Login")" "; done
+check "CDN: each visitor the CDN names has its own bucket (400s)" \
+  "$(t is "$codes" '400 400 400 400 400 400 400 400 400 400 400 400 ')" "$codes"
+codes=
+for i in $(seq 1 12); do
+  codes+=$(code -X POST -H "CF-Connecting-IP: 203.0.113.200" -H "X-Forwarded-For: 198.51.100.$i" -H "X-Real-IP: 198.51.100.$i" "$H/Account/Login")" "
+done
+check "CDN: one visitor stays one bucket whatever X-Forwarded-For / X-Real-IP say: 400s, then 429 (or 403)" \
+  "$(t has "$codes" '^(400 ){1,10}(429|403)')" "$codes"
+codes=
+for i in $(seq 1 12); do
+  codes+=$(docker exec "$id-npm" curl -sk -o /dev/null -w '%{http_code}' --resolve "$name:443:127.0.0.1" -X POST \
+    -H "CF-Connecting-IP: 192.0.2.$i" "$H/Account/Login")" "
+done
+check "CDN: the header from a client outside the CDN's ranges is ignored: 400s, then 429 (or 403)" \
+  "$(t has "$codes" '^(400 ){1,10}(429|403)')" "$codes"
+
 echo
 echo "== $((checks - failures))/$checks checks passed"
 [ "$failures" = 0 ]
