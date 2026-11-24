@@ -1,0 +1,111 @@
+@* The controls of a look (DESIGN.md §34.6): font, corner radius and the four colours. One component for the admin's
+   theme section (Instance: no radius, the radius stays fixed), the poll editor's Look tab and the looks page, so no look
+   control exists twice. Plain markup; the values reach a stylesheet only through ThemeLook.Create. *@
+
+<div class="row g-3 look-fields">
+    <div class="col-12 col-sm-6 col-lg-4 option-field">
+        <label for="@Prefix-font" class="form-label">Font</label>
+        <OptionHelp Label="Font">
+            <p>One of four font lists that use fonts already installed on the visitor's device (System UI is the default); no
+                web font is downloaded, so no font service sees your visitors.@(Instance ? "" : " The font size stays the site's.")</p>
+        </OptionHelp>
+        <select id="@Prefix-font" class="form-select" disabled="@Disabled" value="@Form.Font" @onchange="e => SetAsync(() => Form.Font = e.Value?.ToString() ?? Form.Font)">
+            @foreach (var f in ThemeLook.Fonts)
+            {
+                <option value="@f.Value">@f.Label</option>
+            }
+        </select>
+    </div>
+    @if (!Instance)
+    {
+        <div class="col-12 col-sm-6 col-lg-4 option-field">
+            <label for="@Prefix-radius" class="form-label">Corner radius: @Form.Radius px</label>
+            <OptionHelp Label="Corner radius">
+                <p>Rounding of buttons, fields, cards and badges, @ThemeLook.MinRadius to @ThemeLook.MaxRadius px; the site's
+                    theme uses @ThemeLook.DefaultRadius px. 0 gives square corners.</p>
+            </OptionHelp>
+            <input id="@Prefix-radius" type="range" class="form-range" min="@ThemeLook.MinRadius" max="@ThemeLook.MaxRadius" disabled="@Disabled"
+                   value="@Form.Radius" @oninput="e => SetAsync(() => Form.Radius = Radius(e.Value))" />
+        </div>
+    }
+    <fieldset class="col-12">
+        <legend class="visually-hidden">Colours</legend>
+        <div class="option-field">
+            <span class="form-label fs-6" aria-hidden="true">Colours</span>
+            <OptionHelp Id="@($"{Prefix}-colours")" Label="Colours">
+                @if (Instance)
+                {
+                    <p>Every colour of the site is derived from two per mode, base and highlight, with text contrast raised
+                        until it meets WCAG AA. The base carries buttons, links, the brand mark, result bars, the active
+                        navigation item and the Sidebar layout; the highlight is used sparingly: the band on top of the header,
+                        focus rings, the first-place badge and the leading result bar.</p>
+                    <p>The built-in colours are Teal / Coral in both modes. A colour set here replaces the built-in one for
+                        that mode only; <em>Reset</em> next to it returns to the built-in colour. The base's lightness is
+                        adjusted per mode so that text on it stays readable. Applies to every page, admin pages included.</p>
+                }
+                else
+                {
+                    <p>The poll's pages derive every colour from two per mode, base and highlight, as the site's theme does: text
+                        contrast is raised until it meets WCAG AA, the base carries buttons, links and result bars, the highlight
+                        the header band, focus rings and first places.</p>
+                    <p>Visitors keep their own light or dark choice; the look supplies both. <em>Reset</em> returns a colour to
+                        the built-in Teal / Coral. The look styles the vote and results pages only, never the site's other
+                        pages.</p>
+                }
+            </OptionHelp>
+            <div class="theme-colours">
+                @for (var i = 0; i < ThemeLook.ColourLabels.Count; i++)
+                {
+                    var index = i;
+                    var (label, builtIn) = ThemeLook.ColourLabels[i];
+                    var id = Prefix + "-" + LookForm.ColourIds[i];
+                    var value = Form.Colour(i);
+                    <div class="theme-colour" @key="index">
+                        <label for="@id" class="form-label mb-1" data-help="@($"{Prefix}-colours")">@label</label>
+                        <div class="d-flex align-items-center gap-2">
+                            <input id="@id" type="color" class="form-control form-control-color theme-swatch" value="@value" disabled="@Disabled"
+                                   @onchange="e => SetAsync(() => Form.SetColour(index, e.Value?.ToString() ?? builtIn))" />
+                            <span class="font-monospace small">@value</span>
+                            @if (!Same(value, builtIn))
+                            {
+                                <button type="button" class="btn btn-link btn-sm p-0" disabled="@Disabled" aria-label="@($"Reset {label}")"
+                                        @onclick="() => SetAsync(() => Form.SetColour(index, builtIn))">Reset</button>
+                            }
+                            else
+                            {
+                                <span class="small text-body-secondary">built-in</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </fieldset>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public LookForm Form { get; set; } = default!;
+
+    /// <summary>The admin's theme section: no radius (fixed for the instance), the site-wide help.</summary>
+    [Parameter] public bool Instance { get; set; }
+
+    /// <summary>Id prefix of the controls ("theme" on the admin page, so ids read <c>theme-font</c>, <c>theme-lightbase</c>).</summary>
+    [Parameter] public string Prefix { get; set; } = "look";
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Raised after each change.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private static bool Same(string? a, string b) => string.Equals(a?.Trim(), b, StringComparison.OrdinalIgnoreCase);
+
+    private int Radius(object? value) =>
+        int.TryParse(value?.ToString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var r)
+            ? Math.Clamp(r, ThemeLook.MinRadius, ThemeLook.MaxRadius) : Form.Radius;
+
+    private Task SetAsync(Action change)
+    {
+        change();
+        return Changed.InvokeAsync();
+    }
+}
