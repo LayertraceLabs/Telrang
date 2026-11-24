@@ -140,7 +140,7 @@ public sealed class PollSweepService(
         var now = time.GetUtcNow();
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var candidates = (await NotifyCandidates(db, now)
-                .Select(p => new { p.Id, p.Title, p.ClosedAt, p.ClosesAt, p.ClosedNotifiedAt }).ToListAsync(ct))
+                .Select(p => new { p.Id, p.Title, p.Type, p.QuestionCount, p.PageCount, p.ClosedAt, p.ClosesAt, p.ClosedNotifiedAt }).ToListAsync(ct))
             .Where(p => NotifyDue(p.ClosedAt, p.ClosesAt, p.ClosedNotifiedAt, now))
             .ToList();
         var access = new PollAccessService(dbFactory, time, voterKeys);
@@ -166,7 +166,7 @@ public sealed class PollSweepService(
                 if (emails.Reveal(r.Email) is not { } address || !await AccountGate.MayActAsync(db, r.Id, ct, verifiedEmail: true)) continue;
                 if (await access.GetAsync(db, encoded, VisitorContext.ForUser(r.Id), tracking: false, ct) is not { CanSeeResults: true }) continue;
                 var body = new StringBuilder()
-                    .Append('“').Append(poll.Title).Append("” has closed.\n\n")
+                    .Append('“').Append(poll.Title).Append("” has closed (").Append(PollText.KindLine(poll.Type, poll.QuestionCount, poll.PageCount)).Append(").\n\n")
                     .Append("Results: ").Append(linkBase).Append("p/").Append(encoded).Append("/results\n\n")
                     .Append("Stop emails about this poll: ").Append(linkBase).Append("notify/off/").Append(UnsubscribeToken(r.Id, pollId)).Append('\n')
                     .ToString();

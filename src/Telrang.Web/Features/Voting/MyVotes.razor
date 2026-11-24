@@ -37,7 +37,7 @@ else
                     }
                 </div>
                 <div class="small text-secondary mb-2">
-                    @PollText.TypeName(v.Type) · @v.ResponseCount @(v.ResponseCount == 1 ? "response" : "responses") · updated @PollTime.Format(v.LastUpdated, zone)
+                    @v.Kind · @v.ResponseCount @(v.ResponseCount == 1 ? "response" : "responses") · updated @PollTime.Format(v.LastUpdated, zone)
                 </div>
                 @if (!v.Revoked)
                 {

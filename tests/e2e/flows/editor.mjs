@@ -64,7 +64,7 @@ export async function run({ browser, state, check, tolerate, defer }) {
     if (i >= inputs) { await page.clickText('Add option', 'button'); await page.waitFor(`document.querySelectorAll('.editor-option-main input').length > ${i}`, 'a new option row'); }
     await page.fill(`.editor-option:nth-child(${i + 1}) .editor-option-main input`, v);
   }
-  await page.clickText('Text', 'label');
+  await page.clickText('Text', '[aria-label="Options editor"] label');
   await page.waitFor(`!!document.querySelector('textarea.editor-options-text')`, 'the options text');
   const text = await page.eval(`document.querySelector('textarea.editor-options-text').value`);
   check('Text shows the list', ['Pizza place', 'Noodle bar', 'Salad shop'].every(o => text.includes(o)), text);
@@ -133,7 +133,7 @@ export async function run({ browser, state, check, tolerate, defer }) {
     await page.click(await page.byText(String(day), '.editor-cal-grid button.editor-cal-day'));
     await page.waitFor(`document.querySelectorAll('.editor-days > .editor-day').length >= ${day === 10 ? 1 : 2}`, `day ${day} selected`);
   }
-  await page.clickText('Text', 'label');
+  await page.clickText('Text', '[aria-label="Options editor"] label');
   await page.waitFor(`!!document.querySelector('textarea.editor-options-text')`, 'the dates text');
   const datesText = (await page.eval(`document.querySelector('textarea.editor-options-text').value`)).trimEnd();
   const lines = datesText.split('\n').filter(l => /\d{4}-\d{2}-\d{2}/.test(l));
@@ -157,7 +157,7 @@ export async function run({ browser, state, check, tolerate, defer }) {
   await newEditor(page);
   await page.clickText('Points', 'label');
   check('without draft.js: type switch works', await page.waitFor(`!!document.querySelector('${field('questions[0].budget')}')`, 'the budget field', 5000).catch(() => false));
-  await page.clickText('Text', 'label');
+  await page.clickText('Text', '[aria-label="Options editor"] label');
   check('without draft.js: Text works', await page.waitFor(`!!document.querySelector('textarea.editor-options-text')`, 'the options text', 5000).catch(() => false));
   check('without draft.js: circuit alive', await page.alive());
   const failed = browser.requests.filter(r => /\/js\/draft/.test(r.url)).length;

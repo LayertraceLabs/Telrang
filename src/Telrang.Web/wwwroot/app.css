@@ -1598,7 +1598,7 @@ button.dates-cell:hover:not(:disabled) { border-color: var(--av-primary); }
 .dates-grid .dates-grid-cell.dates-cell-maybe { background-color: var(--av-warning-bg); color: var(--av-warning-fg); }
 
 /* ---- Option help (DESIGN.md §22.2, §23.4) ----------------------------------------------------- */
-.editor-help-row { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+.editor-help-row { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-bottom: 0.5rem; }
 .admin-tabs-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; }
 .admin-tabs-row > .admin-tabs { flex: 1 1 auto; }
 .admin-tabs-row > .admin-help-all { margin-bottom: 0.25rem; }
@@ -1643,7 +1643,7 @@ button.dates-cell:hover:not(:disabled) { border-color: var(--av-primary); }
 .editor-fixed-note .icon { width: 1em; height: 1em; vertical-align: -0.125em; }
 .editor-fixed-row { margin-bottom: 0.25rem; }
 .option-field > .editor-fixed-label { flex: 0 0 auto; }
-.option-field > .editor-fixed-value { flex: 1 1 auto; font-weight: 600; }
+.option-field > .editor-fixed-value { flex: 1 1 auto; font-weight: 600; overflow-wrap: anywhere; }
 .change-log-list { padding-left: 1.25rem; }
 /* In a row of buttons the panel takes its own line under them. */
 .d-flex.flex-wrap > .option-help-panel { flex: 1 0 100%; order: 1; }
@@ -1684,3 +1684,46 @@ button.dates-cell:hover:not(:disabled) { border-color: var(--av-primary); }
 .results-stats .list-inline-item { font-variant-numeric: tabular-nums; }
 .histogram.histogram-wide { width: 100%; max-width: 20rem; height: 3rem; }
 .choice-results .opt-col { min-width: 10rem; }
+
+/* ---- Structured editor (DESIGN.md §34.5): add bar, tabs, outline beside the selected item ---- */
+.editor-addbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; margin: 0 0 1.25rem; padding: 0.5rem;
+    border: 2px dashed var(--av-border-strong); border-radius: var(--bs-border-radius); background-color: var(--av-surface-subtle);
+}
+.editor-addbar .btn .icon { width: 0.875rem; height: 0.875rem; vertical-align: -0.125em; }
+.editor-outline .editor-addbar { margin-top: 0.75rem; }
+.editor-tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0 0 1rem; border-bottom: 1px solid var(--av-border); }
+.editor-tab {
+    margin-bottom: -1px; padding: 0.5rem 0.875rem; border: 1px solid transparent; border-radius: var(--bs-border-radius) var(--bs-border-radius) 0 0;
+    background: none; color: var(--av-link); font-weight: 500;
+}
+.editor-tab:hover { background-color: var(--bs-tertiary-bg); }
+.editor-tab.active { border-color: var(--av-border) var(--av-border) var(--bs-body-bg); background-color: var(--bs-body-bg); color: var(--av-text-strong); font-weight: 600; }
+.editor-tab:focus-visible { outline: 2px solid var(--av-focus-outline); outline-offset: -2px; }
+.editor-size { font-variant-numeric: tabular-nums; }
+.outline-list { margin: 0; padding: 0; list-style: none; }
+.outline-nested { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--av-border); }
+.outline-page + .outline-page { margin-top: 0.5rem; }
+.outline-item {
+    display: flex; align-items: baseline; gap: 0.5rem; width: 100%; margin: 1px 0; padding: 0.3rem 0.5rem;
+    border: 1px solid transparent; border-radius: var(--bs-border-radius); background: none; color: var(--av-text); text-align: left;
+}
+.outline-item:hover { background-color: var(--bs-tertiary-bg); }
+.outline-item:focus-visible { outline: 2px solid var(--av-focus-outline); outline-offset: -2px; }
+.outline-item.selected { border-color: var(--av-primary); background-color: var(--av-active-bg); color: var(--av-text-strong); }
+.outline-label { flex: 1 1 auto; min-width: 0; }
+.outline-page-btn { color: var(--av-text-strong); font-weight: 600; }
+.outline-group-btn { color: var(--av-text-muted); font-size: 0.875rem; font-weight: 600; }
+.outline-type { flex: 0 0 auto; color: var(--av-text-muted); font-size: 0.75rem; }
+.outline-err { flex: 0 0 auto; display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background-color: var(--av-danger-fg); }
+.editor-tab .outline-err { margin-left: 0.375rem; vertical-align: 0.1em; }
+.editor-item { min-width: 0; }
+.editor-item-head {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem;
+    margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--av-border);
+}
+.editor-structured .editor-preview-card { max-width: 48rem; }
+@media (max-width: 575.98px) {
+    .editor-tabs { flex-wrap: nowrap; gap: 0; overflow-x: auto; }
+    .editor-tab { flex: 0 0 auto; padding: 0.5rem 0.625rem; font-size: 0.9375rem; }
+}

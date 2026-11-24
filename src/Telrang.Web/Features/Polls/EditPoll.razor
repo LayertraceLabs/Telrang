@@ -107,7 +107,7 @@
                     message = result.Message;
                     pending = [];
                     model = await Polls.GetForEditAsync(userId, Id);
-                    if (model is not null) await editor.MarkSavedAsync(PollDraft.FromDefinition(model.Definition));
+                    if (model is not null) await editor.MarkSavedAsync(PollDraft.FromDefinition(model.Definition), model.Definition);
                     break;
                 case PollSaveStatus.NotFound:
                     ok = false;

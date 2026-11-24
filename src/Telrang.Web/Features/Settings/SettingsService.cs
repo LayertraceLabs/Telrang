@@ -40,6 +40,13 @@ public static class SettingKeys
     public const string LimitOptions = "Limits.OptionsPerPoll";
     public const string LimitVoterName = "Limits.VoterNameLength";
     public const string LimitResponsesPerVoter = "Limits.ResponsesPerVoter";
+    public const string LimitQuestions = "Limits.QuestionsPerPoll";
+    public const string LimitPages = "Limits.PagesPerPoll";
+    public const string LimitGroups = "Limits.GroupsPerPoll";
+    public const string LimitPrompt = "Limits.QuestionLength";
+    public const string LimitHelp = "Limits.QuestionHelpLength";
+    public const string LimitTextAnswer = "Limits.TextAnswerLength";
+    public const string LimitResponseText = "Limits.FreeTextPerResponseBytes";
 
     public const string CaptchaProvider = "Captcha.Provider";
     public const string CaptchaSiteKey = "Captcha.SiteKey";
@@ -97,7 +104,9 @@ public sealed record MailSettings(
 public sealed record LimitSettings(
     int ActivePollsPerUser, int PollCreationsPerDay, int MaxBallotsPerPoll, int MaxInviteTokensPerPoll,
     int MaxPollDurationDays, int TitleLength, int OptionLabelLength, int OptionDescriptionLength,
-    int PollDescriptionLength, int OptionsPerPoll, int VoterNameLength, int ResponsesPerVoter = 10)
+    int PollDescriptionLength, int OptionsPerPoll, int VoterNameLength, int ResponsesPerVoter = 10,
+    int QuestionsPerPoll = 50, int PagesPerPoll = 20, int GroupsPerPoll = 30, int PromptLength = 200, int HelpLength = 1000,
+    int TextAnswerLength = 2000, int ResponseTextBytes = 8192)
 {
     /// <summary>(key, label, default, help) for the admin form; the help is the option's description (DESIGN.md §22.2).</summary>
     public static readonly IReadOnlyList<(string Key, string Label, int Default, string Help)> Fields =
@@ -143,6 +152,28 @@ public sealed record LimitSettings(
         (SettingKeys.LimitResponsesPerVoter, "Responses per voter (responses: many)", 10,
             "Responses one voter may submit to a poll that allows several (responses: many); changing an existing response " +
             "does not count. The poll owner's limit applies. 0 = no limit. Overridable per account (the owner's)."),
+        (SettingKeys.LimitQuestions, "Questions per poll", 50,
+            "Most questions in one poll, for every account. Checked on create and save, so a poll over a lowered limit keeps its " +
+            $"questions until it is edited. At most {Voting.VoteFormLimits.QuestionsMax} (it bounds the vote form). 0 refuses every poll."),
+        (SettingKeys.LimitPages, "Pages per poll", 20,
+            "Most pages in one poll, for every account; a poll without pages is one page and counts 0. Checked on create and save. " +
+            "At most 50. 0 allows no pages."),
+        (SettingKeys.LimitGroups, "Groups per poll", 30,
+            "Most groups of questions in one poll, for every account. Checked on create and save. At most 50. 0 allows no groups."),
+        (SettingKeys.LimitPrompt, "Question length", 200,
+            "Longest question text in characters, for every account. Checked on create and save. At most 200 (the change log " +
+            "keeps 200). 0 allows only a poll with one question, whose title is the question."),
+        (SettingKeys.LimitHelp, "Question help length", 1000,
+            "Longest help text (Markdown) under a question, in characters, for every account. Checked on create and save. " +
+            "At most 10000. 0 allows no help texts."),
+        (SettingKeys.LimitTextAnswer, "Text answer length", 2000,
+            "Longest answer to a text question, and longest Other text, in characters. A question's own maximum is at most this, " +
+            "checked when the question is created; a question keeps its maximum when this is lowered later. At most " +
+            $"{Voting.VoteFormLimits.FreeTextBytes}. 0 refuses every text answer."),
+        (SettingKeys.LimitResponseText, "Free text per response (bytes)", 8192,
+            "All text answers and Other texts of one response together, in bytes of UTF-8 (a letter with an accent takes 2, " +
+            "most emoji 4). Checked when a ballot is sent; stored ballots are kept. At most " +
+            $"{Voting.VoteFormLimits.FreeTextBytes} (it bounds the vote form). 0 allows no free text."),
     ];
 
     /// <summary>
@@ -161,6 +192,13 @@ public sealed record LimitSettings(
         [SettingKeys.LimitPollDescription] = 10_000,
         [SettingKeys.LimitOptions] = OptionsCeiling,
         [SettingKeys.LimitPollDurationDays] = PollDurationCeilingDays,
+        [SettingKeys.LimitQuestions] = Voting.VoteFormLimits.QuestionsMax,
+        [SettingKeys.LimitPages] = 50,
+        [SettingKeys.LimitGroups] = 50,
+        [SettingKeys.LimitPrompt] = 200,
+        [SettingKeys.LimitHelp] = 10_000,
+        [SettingKeys.LimitTextAnswer] = Voting.VoteFormLimits.FreeTextBytes,
+        [SettingKeys.LimitResponseText] = Voting.VoteFormLimits.FreeTextBytes,
     };
 
     /// <summary>Longest max poll duration (ten years): a larger value made the close instant overflow (R2-POLLS-7).</summary>
@@ -363,7 +401,10 @@ public sealed class SettingsService(
             Limit(SettingKeys.LimitInvitesPerPoll), Limit(SettingKeys.LimitPollDurationDays), Limit(SettingKeys.LimitTitle),
             Limit(SettingKeys.LimitOptionLabel), Limit(SettingKeys.LimitOptionDescription), Limit(SettingKeys.LimitPollDescription),
             Limit(SettingKeys.LimitOptions), Limit(SettingKeys.LimitVoterName),
-            Limit(SettingKeys.LimitResponsesPerVoter));
+            Limit(SettingKeys.LimitResponsesPerVoter),
+            Limit(SettingKeys.LimitQuestions), Limit(SettingKeys.LimitPages), Limit(SettingKeys.LimitGroups),
+            Limit(SettingKeys.LimitPrompt), Limit(SettingKeys.LimitHelp), Limit(SettingKeys.LimitTextAnswer),
+            Limit(SettingKeys.LimitResponseText));
 
         var captcha = new CaptchaSettings(
             Enum.TryParse<CaptchaProvider>(Str(SettingKeys.CaptchaProvider), true, out var provider) ? provider : CaptchaProvider.None,

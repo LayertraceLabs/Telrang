@@ -156,7 +156,7 @@ public class ScoringTests
     }
 
     /// <summary>
-    /// The example in the editor's Scoring help (DESIGN.md §23.4, PollEditor.razor): four options; two voters rank A, B, C, D
+    /// The example in the editor's Scoring help (DESIGN.md §23.4, QuestionEditor.razor): four options; two voters rank A, B, C, D
     /// and one ranks B, C, D, A. Borda: B 10, A 9, C 7, D 4. Dowdall: A 2.25, B 2, C 1.17, D 0.83.
     /// </summary>
     [Fact]
