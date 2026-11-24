@@ -32,6 +32,9 @@ export async function startApp({ dll, image, dataDir, logFile }) {
     // The default console formatter with one line per entry keeps "fail:" / "crit:" at the start of the line.
     Logging__Console__FormatterName: 'simple',
     Logging__Console__FormatterOptions__SingleLine: 'true',
+    // TEMPORARY (DESIGN.md §34 step 2, remove in step 4): the vote-pages flow creates a poll with several pages before the
+    // editor can.
+    Polls__TemporaryAllowStructuredPolls: 'true',
   };
   const container = image ? `telrang-e2e-${port}` : null;
   let proc;
