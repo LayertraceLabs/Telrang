@@ -72,6 +72,20 @@ public class EncryptedEmailTests
         var signedIn = await LoggedInBrowserAsync(factory, "owner@example.com");
         Assert.Equal(HttpStatusCode.OK, (await signedIn.GetAsync("/polls")).StatusCode);
 
+        // DESIGN.md §34.9: text answers, Other texts and drafts that hold an address are ciphertext too.
+        var survey = await CreatePollAsync(factory, ownerId, MultiPageVoteTests.Survey());
+        var answers = new Dictionary<string, Telrang.Web.Features.Voting.QuestionAnswer>
+        {
+            ["q1"] = new() { Choice = new Telrang.Core.Ballots.ChoiceBallot(["yes"]) },
+            ["q3"] = new() { Choice = new Telrang.Core.Ballots.ChoiceBallot([], true), OtherText = "ask other@example.com" },
+            ["q4"] = new() { Text = "Write to me: text.answer@example.com" },
+        };
+        Assert.True((await WithScope(factory, sp => sp.GetRequiredService<Telrang.Web.Features.Voting.BallotService>()
+            .SubmitResponseAsync(survey, VisitorContext.ForUser(targetId), answers, "Voter"))).Succeeded);
+        var survey2 = await CreatePollAsync(factory, ownerId, MultiPageVoteTests.Survey());
+        Assert.True(await WithScope(factory, sp => sp.GetRequiredService<Telrang.Web.Features.Voting.BallotService>()
+            .SaveDraftAsync(survey2, VisitorContext.ForUser(targetId), 0, new Telrang.Web.Features.Voting.CarryState(2, answers, "draft@example.com"))));
+
         await WithScope(factory, async sp =>
         {
             var accounts = sp.GetRequiredService<AccountService>();

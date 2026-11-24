@@ -71,8 +71,12 @@ public sealed class PollService(
     AbuseTracker abuse,
     ClientInfo client,
     Results.PollChangeNotifier notifier,
-    ChangeLogLimiter changeLimiter)
+    ChangeLogLimiter changeLimiter,
+    IConfiguration config)
 {
+    /// <summary>TEMPORARY (§34 step 2, remove in step 4): <see cref="PollParsing.TemporaryStructuredPollsSwitch"/>.</summary>
+    public bool AllowStructured => config.GetValue(PollParsing.TemporaryStructuredPollsSwitch, false);
+
     public const int MaxInvitesPerBatch = 500;
 
     /// <summary><see cref="PollCreation"/> rows older than this are purged on the next creation.</summary>
@@ -92,7 +96,7 @@ public sealed class PollService(
             abuse.Record(client.Key, ownerId, AbuseSignal.LimitRefused);
             return new PollSaveResult(PollSaveStatus.LimitReached, null, [], refusal);
         }
-        var parsed = PollParsing.Validate(draft, Limits, limits.PollDurationDays, now);
+        var parsed = PollParsing.Validate(draft, Limits, limits.PollDurationDays, now, allowStructured: AllowStructured);
         if (!parsed.Success) return new PollSaveResult(PollSaveStatus.Invalid, null, parsed.Errors);
         var definition = parsed.Definition!;
         // No time zone -> the creator's account zone now, stored in the definition, so a later
@@ -220,7 +224,7 @@ public sealed class PollService(
 
         var ownerLimits = await UserLimits.ForUserAsync(db, settings.Current.Limits, a.Poll.OwnerId, time.GetUtcNow(), ct);
         // The duration limit applies only to a changed close date (a transferred poll keeps its own).
-        var parsed = PollParsing.Validate(draft, Limits, ownerLimits.PollDurationDays, a.Poll.CreatedAt, a.Definition);
+        var parsed = PollParsing.Validate(draft, Limits, ownerLimits.PollDurationDays, a.Poll.CreatedAt, a.Definition, AllowStructured);
         if (!parsed.Success) return new EditPass(new PollSaveResult(PollSaveStatus.Invalid, a.EncodedId, parsed.Errors));
         // Empty time zone: keep the poll's stored zone (not the account's current one).
         var updated = parsed.Definition!.TimeZone is null
