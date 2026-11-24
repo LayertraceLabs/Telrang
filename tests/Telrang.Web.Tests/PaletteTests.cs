@@ -49,6 +49,33 @@ public partial class PaletteTests(ITestOutputHelper output)
         { "#7f7f7f", "#808080" },
     };
 
+    /// <summary>
+    /// The instance stylesheet byte for byte (SHA-256 of the output), pinned before the colour, font and radius part of the
+    /// theme became the type poll looks share (DESIGN.md §34.6): that change must not alter <c>theme.css</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("default", "e37fd01da1af7f483854be50f9c7efa66f3023cc411b044d4dc7ac8e47931cce")]
+    [InlineData("overrides", "8155f2432380f6250888722647eb26ffb6f39b637edc76987b0e21b0cd040c2d")]
+    [InlineData("font-size-serif", "1908a533c53f4c01b3a33056d8e52b31ffa25fae69a6dca6a5fd1232803bc2d3")]
+    [InlineData("background-custom", "dfda66dec25c2567ded1896c1fc5497695fe97d6b23799c42ac51000b484fd24")]
+    [InlineData("background-admin", "7197b0bad91692984fbddfd1cfab0436ffa49b930f2ef825f2fbc993fafa2c97")]
+    public void Theme_css_output_is_pinned(string name, string sha256)
+    {
+        var t = name switch
+        {
+            "default" => ThemeSettings.Default,
+            "overrides" => Read((SettingKeys.ThemeLightBase, "#2a6f2b"), (SettingKeys.ThemeLightHighlight, "#e0457b"),
+                (SettingKeys.ThemeDarkBase, "#ffd84d"), (SettingKeys.ThemeDarkHighlight, "#3355ff")),
+            "font-size-serif" => Read((SettingKeys.ThemeFontStack, "serif"), (SettingKeys.ThemeFontSize, "18"), (SettingKeys.ThemeDarkBase, "#000000")),
+            _ => Read((SettingKeys.ThemeFontStack, "mono"), (SettingKeys.ThemeBackgroundEnabled, "true"), (SettingKeys.ThemeBackgroundOverlay, "40"),
+                (SettingKeys.ThemeCustomCss, ".x { color: red; }"), (SettingKeys.ThemeLightBase, "#ffffff")),
+        };
+        var css = ThemeCss.Generate(t, name.StartsWith("background", StringComparison.Ordinal) ? "/branding/background?v=1" : null,
+            includeCustomCss: name != "background-admin");
+        var actual = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(css)));
+        Assert.True(sha256 == actual, $"{name}: {actual}");
+    }
+
     [Fact]
     public void Built_in_theme_generates_every_token_for_light_and_dark()
     {
