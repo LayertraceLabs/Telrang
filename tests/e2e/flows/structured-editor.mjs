@@ -63,7 +63,7 @@ export async function buildSurvey(page, title, { check = () => { } } = {}) {
   await page.waitFor(`!!document.querySelector('.editor-outline')`, 'the outline');
   await waitPlace(page, 'Group: Group 1 · Question 2 of 2');
   check('add group: the first question takes the title', await page.eval(`[...document.querySelectorAll('.outline-label')].some(l => l.textContent.trim() === ${JSON.stringify(title)})`));
-  check('add group: the tabs', await page.eval(`[...document.querySelectorAll('[role=tab]')].map(t => t.textContent.trim()).join('|') === 'Questions|Voting and results|Preview'`));
+  check('add group: the tabs', await page.eval(`[...document.querySelectorAll('[role=tab]')].map(t => t.textContent.trim()).join('|') === 'Questions|Voting and results|Look|Preview'`));
   await page.fill(field('questions[1].prompt'), 'Coming?');
   await page.click(field('questions[1].required'));
   await options(page, ['Yes', 'No']);
