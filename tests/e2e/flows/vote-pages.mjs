@@ -1,6 +1,6 @@
 // A poll with several questions on two pages (DESIGN.md §34.4): voted with JS (the form, enhanced), by a signed-in voter
 // who leaves after page 1 and resumes the draft, and without JS (the app's scripts fail to load: plain form posts, the
-// carry field between the pages).
+// carry field between the pages). The owner's results, ballots view and ballots CSV of it (§34.5) in between.
 import { formAge } from './setup.mjs';
 
 export const name = 'vote-pages';
@@ -65,6 +65,7 @@ export async function run({ app, browser, state, check, tolerate, defer }) {
   check('JS: the tally is the question\'s own', (await js.eval(`document.querySelector('[data-ballot] [data-tally]')?.textContent ?? ''`)).startsWith('1 ranked'));
   await fillPage1(js);
   await js.click('input[name="q4.c"][value="fish"]');
+  await js.fill('textarea[name="q5.text"]', 'Bring forks');
   await formAge(js);
   await js.clickText('Submit ballot', '.vote-submit-bar button');
   await saved(js);
@@ -90,6 +91,27 @@ export async function run({ app, browser, state, check, tolerate, defer }) {
   await saved(admin);
   await admin.goto(`/p/${id}`);
   check('draft: gone after Submit', await admin.eval(`!document.body.innerText.includes('Draft · saved') && document.body.innerText.includes('You have already voted.')`));
+
+  // ---- the owner's results (DESIGN.md §34.5): a section per question under its page and group, the texts ----
+  await admin.goto(`/p/${id}/results`);
+  await admin.waitFor(`document.readyState === 'complete' && !!document.querySelector('.results-question')`, 'the results sections');
+  const sections = await admin.eval(`[...document.querySelectorAll('.results-question h3, .results-question h4')].map(h => h.textContent.trim())`);
+  check('results: one section per question', JSON.stringify(sections) === JSON.stringify(['Dishes', 'Coming?', 'Guests', 'Diet', 'Notes']), JSON.stringify(sections));
+  check('results: page and group headings', await admin.eval(`[...document.querySelectorAll('.results-page-title')].map(h => h.textContent.trim()).join('|') === 'Attending|Food'
+    && document.querySelector('.results-group h3')?.textContent.trim() === 'You'`));
+  check('results: the choice bars name their value', await admin.eval(`[...document.querySelectorAll('.choice-results svg.bar title')].some(t => t.textContent === '2 voters (100%)')`));
+  check('results: the owner reads the texts', await admin.eval(`[...document.querySelectorAll('.free-text-answers bdi.free-text')].some(b => b.textContent === 'Bring forks')`));
+  check('results: live for the owner', await admin.eval(`!!document.querySelector('[data-live-src]')`));
+  await admin.clickText('Ballots', 'a');
+  await admin.waitFor(`location.search === '?view=ballots' && document.readyState === 'complete'`, 'the ballots view');
+  const ballotRows = await admin.eval(`[...document.querySelectorAll('.ballots-responses tbody tr')].map(r => r.innerText)`);
+  check('ballots view: a row per response, a column per question', ballotRows.length === 2
+    && (await admin.eval(`document.querySelectorAll('.ballots-responses thead th').length`)) === 6
+    && ballotRows.some(r => r.includes('Bring forks') && r.includes('Salad')), JSON.stringify(ballotRows));
+  const csv = await admin.eval(`fetch(document.querySelector('a[href$="/export.csv"]').href).then(async r => r.status + ' ' + r.headers.get('content-type') + '\\n' + await r.text())`);
+  const csvLines = csv.split('\r\n');
+  check('ballots CSV: a column per question', csv.startsWith('200 text/csv') && csvLines[0].endsWith('Name,Alias,SubmittedAt,UpdatedAt,q1 · Dishes,q2 · Coming?,q3 · Guests,q4 · Diet,q5 · Notes')
+    && csvLines.some(l => l.endsWith(',Salad,Yes,2,Fish,Bring forks')), csv.slice(0, 400));
 
   // ---- without JS: plain posts, the answers travel in the carry field ----
   // Firefox has no per-context switch for scripting (emulation.setScriptingEnabled is unknown to it), so every script
