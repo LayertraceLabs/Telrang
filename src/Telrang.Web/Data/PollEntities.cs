@@ -48,6 +48,13 @@ public class Poll
     /// <summary>Pages in the definition, at least 1 (a definition without pages is one implicit page); written on save.</summary>
     public int PageCount { get; set; } = 1;
 
+    /// <summary>
+    /// The poll's look (DESIGN.md §34.6): <c>ThemeLook</c> JSON, null = the instance theme. A copy, never a reference to a
+    /// saved look. Cosmetic: not a fixed setting, not in the change log; read through <c>ThemeLook.FromStored</c>, so a value
+    /// that fails the rules shows the instance theme.
+    /// </summary>
+    public string? LookJson { get; set; }
+
     public List<Ballot> Ballots { get; set; } = [];
     public List<InviteToken> InviteTokens { get; set; } = [];
     public List<PollChange> Changes { get; set; } = [];
@@ -141,6 +148,22 @@ public class ResponseDraft
     public required string UserId { get; set; }
     public int ResponseNo { get; set; }
     public required string Cipher { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A look an account keeps for its polls (DESIGN.md §34.7): a name and <c>ThemeLook</c> JSON. Polls hold a copy, so editing
+/// or deleting this never changes a poll. At most <c>UserLimits.SavedLooksPerUser</c> per account; deleted with the account.
+/// </summary>
+public class SavedLook
+{
+    public const int MaxNameLength = 60;
+
+    public Guid Id { get; set; }
+    public required string OwnerId { get; set; }
+    public required string Name { get; set; }
+    public required string LookJson { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

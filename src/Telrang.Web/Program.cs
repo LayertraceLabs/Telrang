@@ -4,6 +4,7 @@ using Telrang.Web.Data;
 using Telrang.Web.Features.Accounts;
 using Telrang.Web.Features.Admin;
 using Telrang.Web.Features.Branding;
+using Telrang.Web.Features.Looks;
 using Telrang.Web.Features.Mail;
 using Telrang.Web.Features.Polls;
 using Telrang.Web.Features.Settings;
@@ -242,6 +243,8 @@ builder.Services.AddSingleton(sp => new EmailProtection(sp.GetRequiredService<ID
 builder.Services.AddScoped<PollAccessService>();
 builder.Services.AddScoped<PollService>();
 builder.Services.AddScoped<BallotService>();
+builder.Services.AddSingleton<LookStyles>(); // poll looks' stylesheets (DESIGN.md §34.6)
+builder.Services.AddScoped<LookService>(); // saved looks, import (DESIGN.md §34.7)
 builder.Services.AddSingleton<VoteFormIds>(); // single-use vote form ids (DESIGN.md §21.1), memory only
 builder.Services.AddSingleton<ResponseTextProtection>(); // free text and drafts at rest (DESIGN.md §34.3)
 builder.Services.AddSingleton<VoteCarry>(); // the multi-page vote form's carry field (DESIGN.md §34.4)
@@ -364,6 +367,7 @@ app.UseMiddleware<FormGuardMiddleware>();
 app.MapHealthChecks("/healthz").DisableHttpMetrics().AllowAnonymous().ExemptFromAbuseBlock();
 app.MapStaticAssets().AllowAnonymous().ExemptFromAbuseBlock(); // the fallback policy would otherwise gate CSS/JS on the enrolment page
 app.MapBranding(); // /branding/theme.css and the images, anonymous like static files
+app.MapLooks(); // /p/{id}/look.css and the look forms' preview (DESIGN.md §34.6, §34.7)
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

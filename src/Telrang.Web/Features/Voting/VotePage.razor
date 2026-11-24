@@ -20,6 +20,12 @@
 @if (access is { } a)
 {
     <PageTitle>@a.Definition.Title - @AppOptions.Value.Name</PageTitle>
+    <PollHead Access="a">
+        @if (a.CanVote || isPost)
+        {
+            <script type="module" src="@Assets["js/vote.js"]"></script>
+        }
+    </PollHead>
 
     var d = a.Definition;
     var q = d.Questions[0];
@@ -40,7 +46,6 @@
 
     @if (a.CanVote || isPost)
     {
-        <HeadContent><script type="module" src="@Assets["js/vote.js"]"></script></HeadContent>
         @if (captchaKey is not null && !showSummary)
         {
             @* The provider script carries the CSP nonce; the CSP lists the provider only while a captcha is on. *@

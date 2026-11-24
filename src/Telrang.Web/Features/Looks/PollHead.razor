@@ -1,0 +1,24 @@
+@inject LookStyles Styles
+@* The one HeadContent of a /p/* page (Blazor shows only the last one rendered): the poll's look (DESIGN.md §34.6),
+   linked after the instance stylesheet so its --av-* tokens win on the whole page, shell included, in both modes, and the
+   page's own head content. Only /p/* pages render this; pages on the ?admin=1 stylesheet never get a look. *@
+@{ var look = ThemeService.UsesAdminVariant(Http?.Request.Path ?? default) ? null : Styles.Href(Access); }
+@if (look is not null || ChildContent is not null)
+{
+    <HeadContent>
+        @if (look is not null)
+        {
+            <link rel="stylesheet" href="@look" data-poll-look />
+        }
+        @ChildContent
+    </HeadContent>
+}
+
+@code {
+    /// <summary>The page's access check (CanView passed).</summary>
+    [Parameter, EditorRequired] public PollAccess Access { get; set; } = default!;
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [CascadingParameter] private HttpContext? Http { get; set; }
+}

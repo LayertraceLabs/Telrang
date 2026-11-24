@@ -146,7 +146,8 @@ public sealed class PollNoStoreMiddleware(RequestDelegate next)
 {
     public Task InvokeAsync(HttpContext http)
     {
-        if (http.Request.Path.StartsWithSegments("/p"))
+        // The poll's look stylesheet (DESIGN.md §34.6) carries colours only and is cached by its hash.
+        if (http.Request.Path.StartsWithSegments("/p") && !Features.Looks.LookEndpoints.IsPollLookPath(http.Request.Path))
         {
             http.Response.OnStarting(() =>
             {

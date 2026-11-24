@@ -96,6 +96,17 @@
         </OptionHelp>
         <input id="setting-retention" type="number" min="0" class="form-control" placeholder="0" @bind="retentionDays" />
     </div>
+    <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" role="switch" id="setting-pollLooks" @bind="pollLooks" />
+        <label class="form-check-label" for="setting-pollLooks">Poll looks</label>
+        <OptionHelp Label="Poll looks">
+            <p>Owners may give a poll its own look: base and highlight colours for light and dark mode, one of the site's fonts
+                and a corner radius. Contrast is checked as for the site's theme; no custom CSS, images or outside fonts. The
+                look styles the poll's vote and results pages only. On by default.</p>
+            <p>Off: every poll shows the site's theme, the editor has no Look tab, and the looks stored with polls are kept
+                but not shown until this is on again. Owners' saved looks stay on their Looks page.</p>
+        </OptionHelp>
+    </div>
     <details class="mb-3">
         <summary>Captcha</summary>
         <div class="row g-2 mt-1">
@@ -329,6 +340,7 @@ else
     private bool captchaHasSecret;
     private string? welcome;
     private string? retentionDays;
+    private bool pollLooks = true;
     private string layout = "topbar";
     private string preset = "system";
     /// <summary>Font and the four colours (the override, else the built-in colour), in the shared look controls.</summary>
@@ -354,6 +366,7 @@ else
         limits = LimitSettings.Fields.ToDictionary(f => f.Key, f => s.Raw.GetValueOrDefault(f.Key));
         (captchaProvider, captchaSiteKey, captchaHasSecret, captchaSecret) = (s.Captcha.Provider, s.Captcha.SiteKey, s.Captcha.HasSecret, null);
         welcome = s.WelcomeMarkdown;
+        pollLooks = s.PollLooks;
         retentionDays = s.RetentionDays > 0 ? s.RetentionDays.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
         var t = s.Theme;
         layout = t.LayoutValue;
@@ -514,6 +527,7 @@ else
             [SettingKeys.PublicUrl] = publicUrl,
             [SettingKeys.LegalPageMarkdown] = legal,
             [SettingKeys.HomeWelcomeMarkdown] = welcome,
+            [SettingKeys.PollLooksEnabled] = pollLooks ? null : "false",
         };
         foreach (var (key, value) in limits) values[key] = value;
         values[SettingKeys.CaptchaProvider] = captchaProvider == CaptchaProvider.None ? null : captchaProvider.ToString();

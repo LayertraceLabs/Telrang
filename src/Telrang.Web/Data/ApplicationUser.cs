@@ -43,4 +43,10 @@ public class ApplicationUser : IdentityUser
     public int? LimitInvitesPerPoll { get; set; }
     public int? LimitPollDurationDays { get; set; }
     public int? LimitResponsesPerVoter { get; set; }
+
+    /// <summary>
+    /// The saved look new polls start with (DESIGN.md §34.7); null = the instance theme. No foreign key (adding one would
+    /// make SQLite rebuild this table): deleting the look clears it, and a dangling id reads as none.
+    /// </summary>
+    public Guid? DefaultLookId { get; set; }
 }

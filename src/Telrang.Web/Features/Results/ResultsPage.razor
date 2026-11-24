@@ -18,6 +18,7 @@
     var d = a.Definition;
     var live = a.CanEdit && results is not null;
     <PageTitle>@(ballots is null ? "Results" : "Ballots"): @d.Title - @AppOptions.Value.Name</PageTitle>
+    <PollHead Access="a" />
     @* DESIGN.md §21.2: on the owner's view js/results-live.js swaps this element's children for the same element of a
        fresh fetch of this page whenever the stream says the poll changed. *@
     <div data-live-results data-live-src="@(live ? $"p/{a.EncodedId}/results/live" : null)">

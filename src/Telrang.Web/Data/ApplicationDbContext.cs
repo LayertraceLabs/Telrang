@@ -11,6 +11,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<InviteToken> InviteTokens => Set<InviteToken>();
     public DbSet<PollChange> PollChanges => Set<PollChange>();
     public DbSet<ResponseDraft> ResponseDrafts => Set<ResponseDraft>();
+    public DbSet<SavedLook> SavedLooks => Set<SavedLook>();
     public DbSet<PollCreation> PollCreations => Set<PollCreation>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<SetupLink> SetupLinks => Set<SetupLink>();
@@ -126,6 +127,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(p => p.ResultsVisibility).HasConversion<string>().HasMaxLength(20);
             e.Property(p => p.VoterMode).HasConversion<string>().HasMaxLength(20);
             e.Property(p => p.ClosedNotifiedAt).HasConversion(binaryTime);
+            e.Property(p => p.LookJson).HasMaxLength(Features.Branding.ThemeLook.MaxJsonLength);
         });
 
         builder.Entity<PollCreation>(e =>
@@ -160,6 +162,19 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(d => d.UserId).HasMaxLength(450);
             e.Property(d => d.UpdatedAt).HasConversion(binaryTime);
             e.HasIndex(d => d.UserId);
+        });
+
+        builder.Entity<SavedLook>(e =>
+        {
+            e.HasKey(l => l.Id);
+            e.Property(l => l.Id).ValueGeneratedNever();
+            e.HasOne<ApplicationUser>().WithMany().HasForeignKey(l => l.OwnerId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(l => l.OwnerId).HasMaxLength(450);
+            e.Property(l => l.Name).HasMaxLength(SavedLook.MaxNameLength);
+            e.Property(l => l.LookJson).HasMaxLength(Features.Branding.ThemeLook.MaxJsonLength);
+            e.Property(l => l.CreatedAt).HasConversion(binaryTime);
+            e.Property(l => l.UpdatedAt).HasConversion(binaryTime);
+            e.HasIndex(l => l.OwnerId);
         });
 
         builder.Entity<PollChange>(e =>

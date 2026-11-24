@@ -16,7 +16,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261124165050_QuestionChangeLog";
+    public override string LastMigrationId => "20261124172656_PollLooks";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -277,6 +277,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .HasColumnType("TEXT");
 
                 b.Property<DateTimeOffset>("CreatedAt")
+                    .HasColumnType("TEXT");
+
+                b.Property<Guid?>("DefaultLookId")
                     .HasColumnType("TEXT");
 
                 b.Property<DateTimeOffset?>("DeletedAt")
@@ -619,6 +622,10 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .IsRequired()
                     .HasColumnType("TEXT");
 
+                b.Property<string>("LookJson")
+                    .HasMaxLength(1024)
+                    .HasColumnType("TEXT");
+
                 b.Property<string>("OwnerId")
                     .IsRequired()
                     .HasColumnType("TEXT");
@@ -756,6 +763,39 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.HasIndex("UserId");
 
                 b.ToTable("ResponseDrafts");
+            });
+
+        modelBuilder.Entity("Telrang.Web.Data.SavedLook", b =>
+            {
+                b.Property<Guid>("Id")
+                    .HasColumnType("TEXT");
+
+                b.Property<long>("CreatedAt")
+                    .HasColumnType("INTEGER");
+
+                b.Property<string>("LookJson")
+                    .IsRequired()
+                    .HasMaxLength(1024)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Name")
+                    .IsRequired()
+                    .HasMaxLength(60)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("OwnerId")
+                    .IsRequired()
+                    .HasMaxLength(450)
+                    .HasColumnType("TEXT");
+
+                b.Property<long>("UpdatedAt")
+                    .HasColumnType("INTEGER");
+
+                b.HasKey("Id");
+
+                b.HasIndex("OwnerId");
+
+                b.ToTable("SavedLooks");
             });
 
         modelBuilder.Entity("Telrang.Web.Data.SetupLink", b =>
@@ -956,6 +996,15 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .IsRequired();
 
                 b.Navigation("Poll");
+            });
+
+        modelBuilder.Entity("Telrang.Web.Data.SavedLook", b =>
+            {
+                b.HasOne("Telrang.Web.Data.ApplicationUser", null)
+                    .WithMany()
+                    .HasForeignKey("OwnerId")
+                    .OnDelete(DeleteBehavior.Cascade)
+                    .IsRequired();
             });
 
         modelBuilder.Entity("Telrang.Web.Data.SetupLink", b =>

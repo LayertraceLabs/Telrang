@@ -1,0 +1,46 @@
+@* A small sample vote page in a look (DESIGN.md §34.7), light and dark side by side. The colours come from
+   /looks/preview.css (ThemeCss.Preview: the look's tokens scoped to these panels, from the look code in its URL, checked by
+   the look rules), so nothing here carries a colour or a style attribute. The link is part of the markup and changes with
+   the look; the browser loads the new sheet. *@
+<link rel="stylesheet" href="@LookStyles.PreviewHref(Look)" />
+<div class="look-preview-pair" aria-label="Preview" role="group">
+    @Panel("light", "Light")
+    @Panel("dark", "Dark")
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ThemeLook Look { get; set; } = default!;
+
+    private static RenderFragment Panel(string mode, string label) => __builder =>
+    {
+        <div class="look-preview look-preview-@mode" data-bs-theme="@mode">
+            <div class="look-preview-header">
+                <span class="look-preview-mark" aria-hidden="true"></span>
+                <span class="look-preview-name">@label</span>
+            </div>
+            <div class="look-preview-body">
+                <div class="fw-semibold mb-1">Dinner on Friday</div>
+                <div class="d-flex align-items-center gap-2 small mb-1">
+                    <span class="rank-pos rank-pos-first">1</span><span>Pasta</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 small mb-2">
+                    <span class="rank-pos">2</span><span>Curry</span>
+                    <span class="badge badge-open ms-auto">Open</span>
+                </div>
+                <svg class="bar mb-1" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+                    <rect class="bar-track" x="0" y="0" width="100" height="6" />
+                    <rect class="bar-fill bar-fill-lead" x="0" y="0" width="72" height="6" />
+                </svg>
+                <svg class="bar mb-2" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+                    <rect class="bar-track" x="0" y="0" width="100" height="6" />
+                    <rect class="bar-fill" x="0" y="0" width="45" height="6" />
+                </svg>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <button type="button" class="btn btn-primary btn-sm" tabindex="-1">Submit</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" tabindex="-1">Back</button>
+                    <span class="look-preview-link small">Results</span>
+                </div>
+            </div>
+        </div>
+    };
+}

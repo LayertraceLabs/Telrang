@@ -534,6 +534,7 @@ public sealed class AccountService(
         await PollService.DeleteCascadeAsync(db, pollIds, ct);
         await db.SetupLinks.Where(l => l.UserId == user.Id).ExecuteDeleteAsync(ct);
         await db.ResponseDrafts.Where(d => d.UserId == user.Id).ExecuteDeleteAsync(ct); // unfinished answers (DESIGN.md §34.4)
+        await db.SavedLooks.Where(l => l.OwnerId == user.Id).ExecuteDeleteAsync(ct); // saved looks (DESIGN.md §34.7)
 
         await RemovePasskeysAsync(user);
         foreach (var login in await users.GetLoginsAsync(user)) await users.RemoveLoginAsync(user, login.LoginProvider, login.ProviderKey);
@@ -551,6 +552,7 @@ public sealed class AccountService(
         user.TwoFactorEnabled = false;
         user.DisplayName = null;
         user.TimeZone = null;
+        user.DefaultLookId = null;
         user.PendingSetup = false;
         user.MustEnrolTwoFactor = false;
         user.LockoutEnabled = true;
@@ -577,7 +579,7 @@ public sealed class AccountService(
     public async Task<byte[]> ExportAsync(ApplicationUser user, CancellationToken ct = default)
     {
         var polls = await db.Polls.AsNoTracking().Where(p => p.OwnerId == user.Id)
-            .Select(p => new { p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt, p.DefinitionJson, Ballots = p.Ballots.Count })
+            .Select(p => new { p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt, p.DefinitionJson, p.LookJson, Ballots = p.Ballots.Count })
             .ToListAsync(ct);
         var ballotRows = await db.Ballots.AsNoTracking().Where(b => b.UserId == user.Id)
             .Select(b => new { b.PollId, b.Poll!.Title, b.Poll.Type, b.ResponseNo, b.DisplayName, b.SubmittedAt, b.UpdatedAt, b.PayloadJson, b.TextCipher })
@@ -606,6 +608,8 @@ public sealed class AccountService(
             d.UpdatedAt,
             answers = DraftContent(textProtection.RevealDraft(d.PollId, user.Id, d.ResponseNo, d.Cipher)),
         }).ToList();
+        var looks = await db.SavedLooks.AsNoTracking().Where(l => l.OwnerId == user.Id)
+            .Select(l => new { l.Id, l.Name, l.LookJson, l.CreatedAt, l.UpdatedAt }).ToListAsync(ct);
         var export = new
         {
             exportedAt = time.GetUtcNow(),
@@ -621,14 +625,30 @@ public sealed class AccountService(
                 Passkeys = (await users.GetPasskeysAsync(user)).Select(p => new { p.Name, p.CreatedAt }),
                 Roles = await users.GetRolesAsync(user),
             },
-            polls = polls.OrderBy(p => p.CreatedAt).Select(p => new { p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt, BallotCount = p.Ballots, definition = JsonSerializer.Deserialize<JsonElement>(p.DefinitionJson) }),
+            polls = polls.OrderBy(p => p.CreatedAt).Select(p => new
+            {
+                p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt, BallotCount = p.Ballots,
+                definition = JsonSerializer.Deserialize<JsonElement>(p.DefinitionJson),
+                look = LookElement(p.LookJson), // DESIGN.md §34.6; null = the instance theme
+            }),
             // Ballots recorded with this account (accounts/public mode, and invite links used while signed
             // in). Anonymous ballots are keyed by a browser cookie and cannot be attributed.
             ballots,
             drafts,
+            // Saved looks (DESIGN.md §34.7), each with its look code for import elsewhere.
+            looks = looks.OrderBy(l => l.CreatedAt).Select(l => new
+            {
+                l.Name, l.CreatedAt, l.UpdatedAt, IsDefault = l.Id == user.DefaultLookId,
+                look = LookElement(l.LookJson),
+                code = Branding.ThemeLook.FromStored(l.LookJson)?.ToCode(),
+            }),
         };
         return JsonSerializer.SerializeToUtf8Bytes(export, ExportJson);
     }
+
+    /// <summary>A stored look as JSON (validated first), or null.</summary>
+    private static JsonElement? LookElement(string? json) =>
+        Branding.ThemeLook.FromStored(json) is { } look ? JsonSerializer.Deserialize<JsonElement>(look.ToJson()) : null;
 
     /// <summary>A draft's answers as stored (scored parts <c>p</c>, free text <c>t</c>, name <c>n</c>); null when unreadable.</summary>
     private static JsonElement? DraftContent(byte[]? plain)

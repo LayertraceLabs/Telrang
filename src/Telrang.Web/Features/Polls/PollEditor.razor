@@ -30,12 +30,23 @@
             <QuestionEditor @key="KeyOf(draft.Questions[0])" Editor="ctx" Question="draft.Questions[0]" Index="0" Simple="true" ShowText="simpleText" />
             @AddBar(null)
             @VotingAndResults()
+            @if (ShowLook)
+            {
+                <section class="editor-section" aria-labelledby="@uid-look">
+                    <h2 class="h5 editor-heading" id="@uid-look">Look</h2>
+                    @LookEditor()
+                </section>
+            }
         }
         else
         {
             <div class="editor-tabs" role="tablist" aria-label="Poll form">
                 @Tab(EditorTab.Questions, "Questions")
                 @Tab(EditorTab.Voting, "Voting and results")
+                @if (ShowLook)
+                {
+                    @Tab(EditorTab.Look, "Look")
+                }
                 @Tab(EditorTab.Preview, "Preview")
             </div>
             <div class="editor-tab-panel" role="tabpanel" id="@uid-panel" aria-labelledby="@uid-tab-@tab">
@@ -53,6 +64,9 @@
                         break;
                     case EditorTab.Voting:
                         @VotingAndResults()
+                        break;
+                    case EditorTab.Look:
+                        @LookEditor()
                         break;
                     case EditorTab.Preview:
                         <PollPreview Draft="draft" Definition="ctx.Result.Definition" DefaultTimeZone="@DefaultTimeZone" Limits="Limits" />
@@ -165,6 +179,12 @@
                     no longer count. Its type and rules stay fixed.</p>
             </OptionHelp>
         </div>
+    };
+
+    /// <summary>The poll's look (DESIGN.md §34.6): kept apart from the draft, saved with it by the page.</summary>
+    private RenderFragment LookEditor() => __builder =>
+    {
+        <PollLookEditor Value="look" ValueChanged="LookChanged" UserId="@(UserId ?? "")" Prefix="@(uid + "-look")" />
     };
 
     private RenderFragment Tab(EditorTab which, string label) => __builder =>

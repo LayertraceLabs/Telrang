@@ -33,6 +33,9 @@ public sealed record EffectiveLimits(int ActivePolls, int PollsPerDay, int Ballo
 
 public static class UserLimits
 {
+    /// <summary>Saved looks per account (DESIGN.md §34.7); a fixed limit, no setting or override.</summary>
+    public const int SavedLooksPerUser = 20;
+
     public static async Task<EffectiveLimits> ForUserAsync(ApplicationDbContext db, LimitSettings s, string userId, DateTimeOffset now, CancellationToken ct = default)
     {
         var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(u => u.Id == userId, ct);
@@ -44,5 +47,6 @@ public static class UserLimits
     public static string PollsPerDayMessage(int n) => $"Limit reached: {n} new {(n == 1 ? "poll" : "polls")} per 24 hours.";
     public static string BallotsMessage(int n) => $"Limit reached: {n} {(n == 1 ? "ballot" : "ballots")} per poll.";
     public static string ResponsesMessage(int n) => $"Limit reached: {n} {(n == 1 ? "response" : "responses")} per voter.";
+    public static string SavedLooksMessage(int n) => $"Limit reached: {n} looks. Delete one first.";
     public static string InvitesMessage(int n, int left) => $"Limit reached: {n} invite links per poll ({left} left).";
 }

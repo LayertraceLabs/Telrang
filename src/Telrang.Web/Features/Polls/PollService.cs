@@ -34,9 +34,15 @@ public sealed record PollEditModel(string EncodedId, PollDefinition Definition, 
 {
     public DateTimeOffset CreatedAt { get; init; }
 
+    /// <summary>The poll's look (DESIGN.md §34.6), null = the instance theme.</summary>
+    public Branding.ThemeLook? Look { get; init; }
+
     /// <summary>The stored close instant (the editor preview shows it while the close date is unchanged).</summary>
     public DateTimeOffset? ClosesAt { get; init; }
 }
+
+/// <summary>"Copy" (DESIGN.md §20.2): the form model of a poll and its look.</summary>
+public sealed record PollCopy(PollDraft Draft, Branding.ThemeLook? Look);
 
 public sealed record PollOverview(PollAccess Access, int BallotCount);
 
@@ -82,7 +88,11 @@ public sealed class PollService(
     /// <summary><see cref="PollCreation"/> rows older than this are purged on the next creation.</summary>
     public static readonly TimeSpan PollCreationRetention = TimeSpan.FromHours(48);
 
-    public async Task<PollSaveResult> CreatePollAsync(string ownerId, PollDraft draft, CancellationToken ct = default)
+    public Task<PollSaveResult> CreatePollAsync(string ownerId, PollDraft draft, CancellationToken ct = default) =>
+        CreatePollAsync(ownerId, draft, null, ct);
+
+    /// <param name="look">The poll's look (DESIGN.md §34.6), stored as a copy; null = the instance theme.</param>
+    public async Task<PollSaveResult> CreatePollAsync(string ownerId, PollDraft draft, Branding.ThemeLook? look, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(draft);
         if (!await MayActAsync(ownerId, ct)) return SetupRequired();
@@ -111,6 +121,7 @@ public sealed class PollService(
             DefinitionJson = "",
             CreatedAt = now,
             UpdatedAt = now,
+            LookJson = look?.ToJson(),
         };
         Apply(poll, definition);
         SetClose(poll, definition, limits.PollDurationDays);
@@ -192,7 +203,14 @@ public sealed class PollService(
     /// R3-DEP-8). Inside it the poll's definition and ballot count are checked against that pass; when either moved, the
     /// pass runs again (at most <see cref="EditAttempts"/> times; the last attempt keeps its counts).</para>
     /// </summary>
-    public async Task<PollSaveResult> UpdatePollAsync(string userId, string encodedId, PollDraft draft, CancellationToken ct = default)
+    public Task<PollSaveResult> UpdatePollAsync(string userId, string encodedId, PollDraft draft, CancellationToken ct = default) =>
+        UpdateAsync(userId, encodedId, draft, setLook: false, null, ct);
+
+    /// <summary>The edit with the poll's look (DESIGN.md §34.6): <paramref name="look"/> replaces the stored one (null = the instance theme). Not change-logged.</summary>
+    public Task<PollSaveResult> UpdatePollAsync(string userId, string encodedId, PollDraft draft, Branding.ThemeLook? look, CancellationToken ct = default) =>
+        UpdateAsync(userId, encodedId, draft, setLook: true, look, ct);
+
+    private async Task<PollSaveResult> UpdateAsync(string userId, string encodedId, PollDraft draft, bool setLook, Branding.ThemeLook? look, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(draft);
         using var serialised = await OwnerLock.AcquireAsync(userId, ct); // a reopening edit counts open polls (R2-POLLS-5)
@@ -200,6 +218,7 @@ public sealed class PollService(
         {
             var pass = await PrepareEditAsync(userId, encodedId, draft, ct);
             if (pass.Refusal is { } refusal) return refusal;
+            if (setLook) pass = pass with { SetLook = true, LookJson = look?.ToJson() };
             var result = await WriteEditAsync(userId, pass, last: attempt >= EditAttempts, ct);
             if (result is not null) return result;
         }
@@ -213,7 +232,7 @@ public sealed class PollService(
     /// <summary>The work of an edit done outside the write transaction.</summary>
     private sealed record EditPass(PollSaveResult? Refusal, string EncodedId = "", string StoredJson = "", PollDefinition? Stored = null,
         PollDefinition? Updated = null, EffectiveLimits? OwnerLimits = null, int BallotCount = 0,
-        IReadOnlyList<OptionChange>? Changes = null, AnswerCounts? Answers = null);
+        IReadOnlyList<OptionChange>? Changes = null, AnswerCounts? Answers = null, bool SetLook = false, string? LookJson = null);
 
     private async Task<EditPass> PrepareEditAsync(string userId, string encodedId, PollDraft draft, CancellationToken ct)
     {
@@ -306,6 +325,7 @@ public sealed class PollService(
         // Only a changed close date recomputes it: a new date, or the date removed.
         if (CloseDateChanged(a.Definition, updated)) SetClose(poll, updated, ownerLimits.PollDurationDays);
         Apply(poll, updated);
+        if (pass.SetLook) poll.LookJson = pass.LookJson; // cosmetic: no change log entry (DESIGN.md §34.6)
         poll.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
@@ -369,6 +389,7 @@ public sealed class PollService(
         {
             CreatedAt = a.Poll.CreatedAt,
             ClosesAt = a.Poll.ClosesAt,
+            Look = Branding.ThemeLook.FromStored(a.Poll.LookJson),
         };
     }
 
@@ -401,7 +422,11 @@ public sealed class PollService(
     /// definition, so they never come along; neither do option keys. The change log stays with the poll. Null when not found or
     /// not the caller's.
     /// </summary>
-    public async Task<PollDraft?> GetCopyAsync(string userId, string encodedId, CancellationToken ct = default)
+    public async Task<PollDraft?> GetCopyAsync(string userId, string encodedId, CancellationToken ct = default) =>
+        (await GetCopyWithLookAsync(userId, encodedId, ct))?.Draft;
+
+    /// <summary><see cref="GetCopyAsync"/> with the poll's look (DESIGN.md §34.7: a copy copies the look).</summary>
+    public async Task<PollCopy?> GetCopyWithLookAsync(string userId, string encodedId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         if (!await AccountGate.MayActAsync(db, userId, ct)) return null;
@@ -419,7 +444,7 @@ public sealed class PollService(
             var withinLimit = PollParsing.LatestClose(limits.PollDurationDays, now) is not { } latest || day <= latest;
             if (!ahead || !withinLimit) draft.ClosesOn = null;
         }
-        return draft;
+        return new PollCopy(draft, Branding.ThemeLook.FromStored(a.Poll.LookJson));
     }
 
     public async Task<PollOverview?> GetOverviewAsync(string userId, string encodedId, CancellationToken ct = default)
