@@ -9,8 +9,14 @@ public sealed record PollOption(string Key, string Label, string DescriptionMark
     public TimeOnly? End { get; init; }
 }
 
+/// <summary>A page of a poll (DESIGN.md §34.2): <see cref="Key"/> is stable (<c>p1</c>, …); the description is Markdown.</summary>
+public sealed record PollPage(string Key, string Title, string DescriptionMarkdown);
+
+/// <summary>A titled box of questions on one page (DESIGN.md §34.2): <see cref="Key"/> is stable (<c>g1</c>, …).</summary>
+public sealed record PollGroup(string Key, string Title, string DescriptionMarkdown);
+
 /// <summary>
-/// One question of a poll (DESIGN.md §20.1): its type, the type's settings and its options. <see cref="Key"/> is stable
+/// One question of a poll (DESIGN.md §20.1, §34.3): its type, the type's settings and its options. <see cref="Key"/> is stable
 /// (<c>q1</c>, …) and keys the question's part of every ballot payload. Settings of the other types keep their defaults.
 /// </summary>
 public sealed record PollQuestion(string Key, PollType Type, IReadOnlyList<PollOption> Options)
@@ -44,11 +50,72 @@ public sealed record PollQuestion(string Key, PollType Type, IReadOnlyList<PollO
     /// on read (no edit-time key exists in them) and dropped on the next save.
     /// </summary>
     public int KeysIssued { get; init; }
+
+    // ---- DESIGN.md §34.2: every question ----
+    // Definitions stored before §34 have none of these; the defaults reproduce them exactly (no prompt: the poll title is
+    // the question; not required: an empty ballot is accepted; no page, no group).
+
+    /// <summary>The question text. May be empty only when the poll has one question (the poll title is the question then).</summary>
+    public string Prompt { get; init; } = "";
+
+    /// <summary>Optional Markdown shown with the question.</summary>
+    public string HelpMarkdown { get; init; } = "";
+
+    /// <summary>
+    /// An answer is needed (DESIGN.md §34.3): ranked = at least one option ranked; points = more than 0 points spent; dates =
+    /// at least one yes or maybe; choice = a selection; text = a non-blank text; number = a number. Fixed at creation.
+    /// </summary>
+    public bool Required { get; init; }
+
+    /// <summary>The key of the <see cref="PollPage"/> the question is on; null in a definition without pages (one implicit page).</summary>
+    public string? Page { get; init; }
+
+    /// <summary>The key of the <see cref="PollGroup"/> the question is in, or null.</summary>
+    public string? Group { get; init; }
+
+    // ---- Choice (DESIGN.md §34.3; one type for multiple choice and checkboxes) ----
+
+    /// <summary>Choice: fewest selections of an answered question (1 or more; the Other answer counts as one).</summary>
+    public int MinSelect { get; init; } = 1;
+
+    /// <summary>Choice: most selections; 1 = radio buttons or a dropdown, more = checkboxes.</summary>
+    public int MaxSelect { get; init; } = 1;
+
+    /// <summary>Choice: offers "Other" with a free text (kept apart from the scored payload, DESIGN.md §34.3).</summary>
+    public bool AllowOther { get; init; }
+
+    /// <summary>Choice: buttons or dropdown (dropdown only with <see cref="MaxSelect"/> 1).</summary>
+    public ChoiceDisplay Display { get; init; } = ChoiceDisplay.Buttons;
+
+    // ---- Text ----
+
+    /// <summary>Text: a multi-line box instead of a single line.</summary>
+    public bool Multiline { get; init; }
+
+    /// <summary>Text: fewest characters of a given answer (null = no minimum).</summary>
+    public int? MinLength { get; init; }
+
+    /// <summary>Text: most characters; made at creation (the admin's limit when the draft leaves it empty).</summary>
+    public int? MaxLength { get; init; }
+
+    // ---- Number ----
+
+    /// <summary>Number: smallest accepted value (null = none).</summary>
+    public decimal? Min { get; init; }
+
+    /// <summary>Number: largest accepted value (null = none).</summary>
+    public decimal? Max { get; init; }
+
+    /// <summary>Number: most decimal places (0 to <see cref="PollRules.MaxDecimals"/>).</summary>
+    public int Decimals { get; init; }
+
+    /// <summary>Number: unit shown after the value (at most <see cref="PollRules.UnitMax"/> characters).</summary>
+    public string Unit { get; init; } = "";
 }
 
 /// <summary>
 /// Validated, immutable poll definition (made by <see cref="PollDraftValidator"/>). Poll-wide settings live here, the
-/// type, its settings and options in <see cref="Questions"/> (exactly one for now; pages read <c>Questions[0]</c>).
+/// type, its settings and options in <see cref="Questions"/> (single-question pages read <c>Questions[0]</c>).
 /// <para><see cref="ClosesOn"/>: the poll closes at the end of that day in <see cref="TimeZone"/>; Core has no time zone
 /// database, so the instant is computed by the host.</para>
 /// <para><see cref="TimeZone"/> is an IANA id, checked only syntactically here (the host validates it against its zone
@@ -68,6 +135,27 @@ public sealed record PollDefinition(string Title, string DescriptionMarkdown, IR
     public ResponsePolicy Responses { get; init; } = ResponsePolicy.One;
     public DateOnly? ClosesOn { get; init; }
     public string? TimeZone { get; init; }
+
+    /// <summary>
+    /// The pages in order (DESIGN.md §34.2). Empty = one implicit page holding every question (every definition stored
+    /// before §34); then no question names a page.
+    /// </summary>
+    public IReadOnlyList<PollPage> Pages { get; init; } = [];
+
+    /// <summary>The groups (DESIGN.md §34.2), in the order of their first question.</summary>
+    public IReadOnlyList<PollGroup> Groups { get; init; } = [];
+
+    /// <summary>
+    /// How many question keys were ever issued; keys an edit adds are numbered from here and never reused (DESIGN.md §34.2).
+    /// Definitions stored before §34 have 0: <see cref="PollRules.IssuedSoFar"/> then reads the highest key they hold.
+    /// </summary>
+    public int QuestionsIssued { get; init; }
+
+    /// <summary>How many page keys were ever issued (see <see cref="QuestionsIssued"/>).</summary>
+    public int PagesIssued { get; init; }
+
+    /// <summary>How many group keys were ever issued (see <see cref="QuestionsIssued"/>).</summary>
+    public int GroupsIssued { get; init; }
 
     /// <summary>The key of question number <paramref name="index"/> (0-based): <c>q1</c>, <c>q2</c>, …</summary>
     public static string QuestionKey(int index) => $"q{index + 1}";

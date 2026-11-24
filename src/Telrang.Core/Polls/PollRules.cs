@@ -23,6 +23,66 @@ public static class PollRules
         return type == PollType.Dates ? Math.Min(limits.OptionsMax, MaxDateOptions) : limits.OptionsMax;
     }
 
+    /// <summary>Most decimal places a number question allows (DESIGN.md §34.3).</summary>
+    public const int MaxDecimals = 6;
+
+    /// <summary>Longest unit of a number question.</summary>
+    public const int UnitMax = 16;
+
+    /// <summary>
+    /// The largest absolute value of a number question's bounds and answers (10^15): with at most 6 decimals every sum the
+    /// results compute stays far inside <see cref="decimal"/>.
+    /// </summary>
+    public const decimal NumberAbsMax = 1_000_000_000_000_000m;
+
+    /// <summary>Whether questions of <paramref name="type"/> have options (every type but text and number).</summary>
+    public static bool UsesOptions(PollType type) => type is not (PollType.Text or PollType.Number);
+
+    /// <summary>
+    /// How many keys of one kind (<c>q</c>, <c>p</c>, <c>g</c>) were ever issued: the stored counter, or the highest number
+    /// among <paramref name="keys"/> when that is more (a definition stored before DESIGN.md §34 has no counter), so an
+    /// edit never numbers a new key like one the poll has or had.
+    /// </summary>
+    public static int IssuedSoFar(int counter, IEnumerable<string> keys, char prefix)
+    {
+        var issued = counter;
+        foreach (var k in keys)
+            if (k.Length > 1 && k[0] == prefix && int.TryParse(k.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n > issued)
+                issued = n;
+        return issued;
+    }
+
+    /// <summary>The key of the <paramref name="n"/>-th page (<c>p1</c>…) or group (<c>g1</c>…): <paramref name="prefix"/> + number.</summary>
+    public static string NumberedKey(char prefix, int n) => prefix + n.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>The number of decimal places a value really needs: 12.50 has 1.</summary>
+    public static int Scale(decimal value)
+    {
+        value /= 1.000000000000000000000000000000000m; // drops trailing zeros
+        return (decimal.GetBits(value)[3] >> 16) & 0xFF;
+    }
+
+    public static string DescriptionTooLongFor(string what, PollLimits l, int n) => $"Shorten the {what} description to {l.DescriptionMax} characters (now {n}).";
+    public static string TooManyQuestions(int max, int n) => $"Remove questions: at most {max} are allowed (now {n}).";
+    public static string TooManyPages(int max, int n) => $"Remove pages: at most {max} are allowed (now {n}).";
+    public static string TooManyGroups(int max, int n) => $"Remove groups: at most {max} are allowed (now {n}).";
+    public static string PromptTooLong(PollLimits l, int n) => $"Shorten the question to {l.PromptMax} characters (now {n}).";
+    public static string HelpTooLong(PollLimits l, int n) => $"Shorten the help text to {l.HelpMax} characters (now {n}).";
+    public static string TitleTooLongFor(string what, PollLimits l, int n) => $"Shorten the {what} title to {l.TitleMax} characters (now {n}).";
+    public static string HiddenCharactersIn(string what) => $"Remove control and invisible formatting characters from the {what}.";
+    public const string NeedPrompt = "Enter the question: a poll with several questions needs one for each.";
+    public const string NeedPageList = "Pick a page from the list.";
+    public const string NeedGroupList = "Pick a group from the list.";
+    public const string PageOrder = "Move this question above the questions of later pages.";
+    public const string GroupTogether = "Keep the questions of a group together, on one page.";
+    public const string EmptyPage = "Add a question to this page, or remove the page.";
+    public const string EmptyGroup = "Add a question to this group, or remove the group.";
+    public const string DropdownNeedsOne = "Show buttons: a dropdown allows one selection.";
+    public static string TooFewForMax(int max) => $"Keep at least {max} options: voters may pick {max}.";
+    public static string MaxSelectTooBig(int n) => $"Lower the maximum to the number of options ({n}).";
+    public static string NumberTooBig() => $"Use a value between -{NumberAbsMax:0} and {NumberAbsMax:0}.";
+    public static string TooManyDecimals(int max) => max == 0 ? "Use a whole number." : $"Use at most {max} decimal places.";
+
     /// <summary>Error for a dates line that is not a date, a time or a range.</summary>
     public const string DateItemHelp = "Write a date like 2026-11-03, a time like 2026-11-03 19:00, or a range like 2026-11-03 to 2026-11-05.";
 
