@@ -397,7 +397,8 @@ public sealed class PollService(
         var a = await access.GetAsync(db, encodedId, VisitorContext.ForUser(userId), tracking: false, ct);
         if (a is null || !a.CanEdit) return null;
         var draft = PollDraft.FromDefinition(a.Definition);
-        // A copy is a new poll: its options get their own keys (DESIGN.md §26).
+        // A copy is a new poll: its questions and options get their own keys (DESIGN.md §26, §34.2).
+        foreach (var q in draft.Questions) q.Key = null;
         foreach (var o in draft.Questions.SelectMany(q => q.Options)) o.Key = null;
         if (draft.ClosesOn is { } day)
         {

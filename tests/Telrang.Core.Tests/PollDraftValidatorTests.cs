@@ -299,13 +299,15 @@ public class PollDraftValidatorTests
     }
 
     [Fact]
-    public void Exactly_one_question()
+    public void At_least_one_question()
     {
         var d = Ranked("A", "B");
-        d.Questions.Add(new QuestionDraft());
-        HasError(Fail(d), "questions");
         d.Questions.Clear();
         HasError(Fail(d), "questions");
+        // DESIGN.md §34: more than one question is allowed (it then needs prompts); the web app gates it until step 2.
+        d.Questions.Add(new QuestionDraft { Type = PollType.Ranked, Prompt = "One", Options = [O("A"), O("B")] });
+        d.Questions.Add(new QuestionDraft { Type = PollType.Ranked, Prompt = "Two", Options = [O("A"), O("B")] });
+        Assert.Equal(["q1", "q2"], Ok(d).Questions.Select(q => q.Key));
     }
 
     [Fact]

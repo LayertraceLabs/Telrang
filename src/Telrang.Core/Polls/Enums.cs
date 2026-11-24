@@ -1,6 +1,13 @@
 namespace Telrang.Core.Polls;
 
-public enum PollType { Ranked, Points, Dates }
+/// <summary>
+/// The question types (DESIGN.md §18, §34.3). The numeric values are stored with nothing but the name, but new members only
+/// ever go at the end.
+/// </summary>
+public enum PollType { Ranked, Points, Dates, Choice, Text, Number }
+
+/// <summary>How a <see cref="PollType.Choice"/> question shows its options; a dropdown needs a maximum of one selection.</summary>
+public enum ChoiceDisplay { Buttons, Dropdown }
 public enum ScoringScheme { Borda, Dowdall }
 /// <summary>
 /// Who sees the results besides the owner (DESIGN.md §25): <see cref="Creator"/> nobody, <see cref="AfterVote"/> voters
