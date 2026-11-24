@@ -171,6 +171,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(c => c.Kind).HasConversion<string>().HasMaxLength(20);
             e.Property(c => c.Label).HasMaxLength(PollChange.MaxLabelLength);
             e.Property(c => c.OldLabel).HasMaxLength(PollChange.MaxLabelLength);
+            e.Property(c => c.QuestionKey).HasMaxLength(PollChange.MaxKeyLength);
+            e.Property(c => c.QuestionLabel).HasMaxLength(PollChange.MaxLabelLength);
             e.HasIndex(c => new { c.PollId, c.At, c.Seq });
         });
 

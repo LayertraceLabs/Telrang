@@ -17,7 +17,7 @@ partial class PostgresDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261124152944_MultiQuestionVoting";
+    public override string LastMigrationId => "20261124165055_QuestionChangeLog";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -702,6 +702,14 @@ partial class PostgresDbContextModelSnapshot : ModelSnapshot
 
                 b.Property<Guid>("PollId")
                     .HasColumnType("uuid");
+
+                b.Property<string>("QuestionKey")
+                    .HasMaxLength(32)
+                    .HasColumnType("text");
+
+                b.Property<string>("QuestionLabel")
+                    .HasMaxLength(200)
+                    .HasColumnType("text");
 
                 b.Property<int>("Seq")
                     .HasColumnType("integer");

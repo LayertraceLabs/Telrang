@@ -1,5 +1,10 @@
-@* One change log entry in words (DESIGN.md §26, §31), the same text as PollText.ChangeText. Every label is isolated in
-   <bdi>, so a right-to-left label cannot reorder the words around it. *@
+@* One change log entry in words (DESIGN.md §26, §31, §34.5), the same text as PollText.ChangeText. Every label is isolated in
+   <bdi>, so a right-to-left label cannot reorder the words around it. Option entries of a structured poll name their
+   question first (Question). *@
+@if (PollText.IsOptionChange(Kind) && !string.IsNullOrEmpty(Question))
+{
+    <bdi>@Question</bdi>@(": ")
+}
 @switch (Kind)
 {
     case OptionChangeKind.Added:
@@ -24,9 +29,25 @@
         <text>@PollText.EarlierChanges(BallotCount ?? 0)</text>
         break;
     case OptionChangeKind.QuestionAdded:
+        <text>Question @Quoted(Label) added</text>
+        break;
     case OptionChangeKind.QuestionRemoved:
+        <text>Question @Quoted(Label) removed@(BallotCount is int r ? $" (answered on {PollText.BallotsText(r)})" : "")</text>
+        break;
     case OptionChangeKind.QuestionRenamed:
-        throw new NotSupportedException(); // §34 step 4
+        if (string.IsNullOrEmpty(OldLabel))
+        {
+            <text>Question renamed to @Quoted(Label)</text>
+        }
+        else if (string.IsNullOrEmpty(Label))
+        {
+            <text>Question @Quoted(OldLabel) renamed to the poll title</text>
+        }
+        else
+        {
+            <text>Question @Quoted(OldLabel) renamed to @Quoted(Label)</text>
+        }
+        break;
     default:
         throw new ArgumentOutOfRangeException(nameof(Kind), Kind, null);
 }
@@ -36,7 +57,24 @@
     [Parameter, EditorRequired] public string Label { get; set; } = "";
     [Parameter] public string? OldLabel { get; set; }
 
-    /// <summary>Removed: the ballots that answered the option, null to leave the count out (a viewer who cannot see the
-    /// results, DESIGN.md §31). Earlier: how many entries were merged.</summary>
+    /// <summary>The question an option entry is about, in a structured poll (null: none named).</summary>
+    [Parameter] public string? Question { get; set; }
+
+    /// <summary>Removed (an option or a question): the ballots that answered it, null to leave the count out (a viewer who
+    /// cannot see the results, DESIGN.md §31). Earlier: how many entries were merged.</summary>
     [Parameter] public int? BallotCount { get; set; }
+
+    private static RenderFragment Quoted(string? label) => builder =>
+    {
+        if (string.IsNullOrEmpty(label))
+        {
+            builder.AddContent(0, "untitled");
+            return;
+        }
+        builder.AddContent(1, "“");
+        builder.OpenElement(2, "bdi");
+        builder.AddContent(3, label);
+        builder.CloseElement();
+        builder.AddContent(4, "”");
+    };
 }

@@ -56,22 +56,59 @@ public static class PollText
     }
 
     /// <summary>
-    /// One change log entry in words (DESIGN.md §26, §31), e.g. "“Pizza” removed (on 7 ballots)"; a removal without a count
-    /// (<paramref name="ballotCount"/> null) is "“Pizza” removed". Pages render it through <c>ChangeLine</c>, which isolates
-    /// the labels.
+    /// One change log entry in words (DESIGN.md §26, §31, §34.5), e.g. "“Pizza” removed (on 7 ballots)"; a removal without a
+    /// count (<paramref name="ballotCount"/> null) is "“Pizza” removed". Option entries of a structured poll name their
+    /// question first (<paramref name="question"/>: "Diet: “Pizza” removed"). Pages render it through <c>ChangeLine</c>, which
+    /// isolates the labels.
     /// </summary>
-    public static string ChangeText(OptionChangeKind kind, string label, string? oldLabel, int? ballotCount) => kind switch
+    public static string ChangeText(OptionChangeKind kind, string label, string? oldLabel, int? ballotCount, string? question = null)
     {
-        OptionChangeKind.Added => $"“{label}” added",
-        OptionChangeKind.Removed => ballotCount is int n ? $"“{label}” removed (on {BallotsText(n)})" : $"“{label}” removed",
-        OptionChangeKind.Renamed => $"“{oldLabel}” renamed to “{label}”",
-        OptionChangeKind.DetailsChanged => $"Details of “{label}” changed",
-        OptionChangeKind.TitleChanged => $"Title changed: “{oldLabel}” → “{label}”",
-        OptionChangeKind.DescriptionChanged => "Description changed",
-        OptionChangeKind.Earlier => EarlierChanges(ballotCount ?? 0),
-        OptionChangeKind.QuestionAdded or OptionChangeKind.QuestionRemoved or OptionChangeKind.QuestionRenamed => throw new NotSupportedException(), // §34 step 4
+        var prefix = IsOptionChange(kind) && !string.IsNullOrEmpty(question) ? question + ": " : "";
+        return prefix + (kind switch
+        {
+            OptionChangeKind.Added => $"“{label}” added",
+            OptionChangeKind.Removed => ballotCount is int n ? $"“{label}” removed (on {BallotsText(n)})" : $"“{label}” removed",
+            OptionChangeKind.Renamed => $"“{oldLabel}” renamed to “{label}”",
+            OptionChangeKind.DetailsChanged => $"Details of “{label}” changed",
+            OptionChangeKind.TitleChanged => $"Title changed: “{oldLabel}” → “{label}”",
+            OptionChangeKind.DescriptionChanged => "Description changed",
+            OptionChangeKind.Earlier => EarlierChanges(ballotCount ?? 0),
+            OptionChangeKind.QuestionAdded => $"Question {Quoted(label)} added",
+            OptionChangeKind.QuestionRemoved => ballotCount is int n ? $"Question {Quoted(label)} removed (answered on {BallotsText(n)})" : $"Question {Quoted(label)} removed",
+            OptionChangeKind.QuestionRenamed => string.IsNullOrEmpty(oldLabel) ? $"Question renamed to {Quoted(label)}"
+                : string.IsNullOrEmpty(label) ? $"Question {Quoted(oldLabel)} renamed to the poll title" : $"Question {Quoted(oldLabel)} renamed to {Quoted(label)}",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+        });
+    }
+
+    /// <summary>A question's text in quotes; a question without one (the poll title was the question) is "untitled".</summary>
+    private static string Quoted(string? label) => string.IsNullOrEmpty(label) ? "untitled" : $"“{label}”";
+
+    /// <summary>An entry about an option of a question (the ones a structured poll names the question on).</summary>
+    public static bool IsOptionChange(OptionChangeKind kind) => kind switch
+    {
+        OptionChangeKind.Added or OptionChangeKind.Removed or OptionChangeKind.Renamed or OptionChangeKind.DetailsChanged => true,
+        OptionChangeKind.TitleChanged or OptionChangeKind.DescriptionChanged or OptionChangeKind.Earlier
+            or OptionChangeKind.QuestionAdded or OptionChangeKind.QuestionRemoved or OptionChangeKind.QuestionRenamed => false,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
+
+    /// <summary>An entry that carries a ballot count: an option or a question removed.</summary>
+    public static bool IsRemoval(OptionChangeKind kind) => kind is OptionChangeKind.Removed or OptionChangeKind.QuestionRemoved;
+
+    /// <summary>
+    /// The size of a poll in lists, mails and on the share page (DESIGN.md §34.1): a simple poll's type ("Ranked", a choice
+    /// with several picks "Checkboxes" is not told apart here), a structured one's "4 pages · 9 questions" ("9 questions" on one page).
+    /// </summary>
+    public static string KindLine(PollType type, int questions, int pages) =>
+        questions <= 1 && pages <= 1 ? TypeName(type) : SizeLine(pages, questions);
+
+    /// <summary>"4 pages · 9 questions", or "9 questions" for one page.</summary>
+    public static string SizeLine(int pages, int questions)
+    {
+        var q = questions.ToString(CultureInfo.InvariantCulture) + (questions == 1 ? " question" : " questions");
+        return pages <= 1 ? q : pages.ToString(CultureInfo.InvariantCulture) + " pages · " + q;
+    }
 
     /// <summary>The entry older entries beyond the cap are merged into (DESIGN.md §31).</summary>
     public static string EarlierChanges(int n) => n == 1 ? "1 earlier change" : n.ToString(CultureInfo.InvariantCulture) + " earlier changes";

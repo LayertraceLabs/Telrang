@@ -12,8 +12,8 @@
         <ul class="small mb-0 change-log-list">
             @foreach (var c in Log.Entries)
             {
-                <li @key="c.Id"><ChangeLine Kind="c.Kind" Label="@c.Label" OldLabel="@c.OldLabel"
-                    BallotCount="@(c.Kind == OptionChangeKind.Removed && !ShowCounts ? null : c.BallotCount)" />
+                <li @key="c.Id"><ChangeLine Kind="c.Kind" Label="@c.Label" OldLabel="@c.OldLabel" Question="@c.QuestionLabel"
+                    BallotCount="@(PollText.IsRemoval(c.Kind) && !ShowCounts ? null : c.BallotCount)" />
                     <span class="text-secondary">· @PollTime.Format(c.At, ZoneId)</span></li>
             }
         </ul>

@@ -170,8 +170,8 @@ public class InviteToken
 }
 
 /// <summary>
-/// One entry of a poll's change log (DESIGN.md §26, §31): an option added, removed, renamed or given new details, or the
-/// title or description changed, after the poll had its first ballot. Written by <c>PollService</c> in the edit's
+/// One entry of a poll's change log (DESIGN.md §26, §31, §34.5): an option added, removed, renamed or given new details, a
+/// question added, removed or renamed, or the title or description changed, after the poll had its first ballot. Written by <c>PollService</c> in the edit's
 /// transaction, shown to everyone who can view the poll, never edited or hidden. At most <see cref="MaxEntries"/> per poll:
 /// older ones are merged into one <see cref="OptionChangeKind.Earlier"/> entry. Deleted with the poll, kept on transfer,
 /// never copied.
@@ -180,6 +180,9 @@ public class PollChange
 {
     /// <summary>Labels are stored up to the highest option label limit an admin can set.</summary>
     public const int MaxLabelLength = 200;
+
+    /// <summary>Question keys are <c>q</c> and a number.</summary>
+    public const int MaxKeyLength = 32;
 
     /// <summary>Most entries kept per poll, the merged "n earlier changes" entry included (DESIGN.md §31).</summary>
     public const int MaxEntries = 500;
@@ -204,9 +207,20 @@ public class PollChange
     /// <summary>Renamed: the label before.</summary>
     public string? OldLabel { get; set; }
 
-    /// <summary>Removed: how many stored ballots answered the option (ranked or banned, points above 0, yes or maybe).
-    /// Earlier: how many entries were merged into this one.</summary>
+    /// <summary>Removed: how many stored ballots answered the option (ranked or banned, points above 0, yes or maybe, picked);
+    /// a removed question: how many answered it (had a part for it). Earlier: how many entries were merged into this one.</summary>
     public int? BallotCount { get; set; }
+
+    /// <summary>The question an entry is about (DESIGN.md §34.5): its key, on every question and option entry; null on the
+    /// poll's own entries and on entries stored before §34.</summary>
+    public string? QuestionKey { get; set; }
+
+    /// <summary>
+    /// The question's text, by which the log names it: on question entries (added, removed, renamed: its text after the
+    /// change, a removed one's last) and on option entries of a structured poll; null where nothing is named (a simple poll's
+    /// option entries, the poll's own entries).
+    /// </summary>
+    public string? QuestionLabel { get; set; }
 }
 
 /// <summary>
