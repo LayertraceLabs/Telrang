@@ -55,6 +55,12 @@ public class Poll
     /// </summary>
     public string? LookJson { get; set; }
 
+    /// <summary>
+    /// Set when an admin disabled the poll (DESIGN.md §34.8): <c>PollAccessService</c> then answers it as unavailable (410) to
+    /// everyone but its owner and admins, and nobody can vote. Cleared when an admin enables it again.
+    /// </summary>
+    public DateTimeOffset? DisabledAt { get; set; }
+
     public List<Ballot> Ballots { get; set; } = [];
     public List<InviteToken> InviteTokens { get; set; } = [];
     public List<PollChange> Changes { get; set; } = [];
@@ -165,6 +171,51 @@ public class SavedLook
     public required string LookJson { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public enum ReportCategory { IllegalContent, Abuse, Impersonation, Spam, Other }
+
+public enum ReportState
+{
+    Open,
+    /// <summary>The admin found nothing to do; the text and the contact address are erased.</summary>
+    Dismissed,
+    /// <summary>The admin disabled the poll; enabling it again opens the report again.</summary>
+    Acted,
+}
+
+/// <summary>
+/// A visitor's report of a poll (DESIGN.md §34.8). Nothing about the reporter is stored: no address, user agent, voter
+/// identity or account; only what they typed, and that encrypted like an address (DESIGN.md §30). At most
+/// <c>ReportService.MaxOpenPerPoll</c> open per poll and <c>ReportService.MaxOpen</c> in all. Deleted with the poll.
+/// </summary>
+public class PollReport
+{
+    /// <summary>Longest report text in characters.</summary>
+    public const int MaxTextLength = 1000;
+
+    /// <summary>Longest contact address (RFC 5321 path limit).</summary>
+    public const int MaxContactLength = 254;
+
+    public Guid Id { get; set; }
+    public Guid PollId { get; set; }
+    public Poll? Poll { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public ReportCategory Category { get; set; }
+
+    /// <summary>The report's text, encrypted (<c>EmailProtection.Protect</c>); null when none was given or once dismissed.</summary>
+    public string? TextCipher { get; set; }
+
+    /// <summary>The contact address the reporter typed, encrypted; null when none was given or once dismissed.</summary>
+    public string? ContactCipher { get; set; }
+
+    public ReportState State { get; set; }
+
+    /// <summary>When an admin dismissed or acted on it; null while open.</summary>
+    public DateTimeOffset? HandledAt { get; set; }
+
+    /// <summary>The admin action log entry of that decision (<c>AdminActionLog.Id</c>; no foreign key: the log is trimmed).</summary>
+    public long? HandledLogId { get; set; }
 }
 
 /// <summary>Single-person invite link. Only the SHA-256 of the token is stored.</summary>

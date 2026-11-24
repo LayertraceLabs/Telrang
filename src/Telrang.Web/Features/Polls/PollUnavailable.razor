@@ -1,0 +1,13 @@
+@* The whole page of a disabled poll for everyone but its owner and admins (DESIGN.md §34.8): one line, nothing of the poll
+   (no title, no look). The page sets the 410 status before it renders this (PollUnavailable.Answer). *@
+<PageTitle>Unavailable</PageTitle>
+<p class="poll-unavailable">@PollAccessService.UnavailableMessage</p>
+
+@code {
+    /// <summary>Sets the 410 status of a page that renders this component instead of the poll.</summary>
+    public static void Answer(HttpContext http) => http.Response.StatusCode = StatusCodes.Status410Gone;
+
+    /// <summary>The 410 answer of an endpoint (stylesheet, live stream, report form): the one line as text.</summary>
+    public static IResult Result() =>
+        Microsoft.AspNetCore.Http.Results.Text(PollAccessService.UnavailableMessage, "text/plain; charset=utf-8", statusCode: StatusCodes.Status410Gone);
+}

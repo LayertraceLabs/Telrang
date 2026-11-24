@@ -12,6 +12,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<PollChange> PollChanges => Set<PollChange>();
     public DbSet<ResponseDraft> ResponseDrafts => Set<ResponseDraft>();
     public DbSet<SavedLook> SavedLooks => Set<SavedLook>();
+    public DbSet<PollReport> PollReports => Set<PollReport>();
     public DbSet<PollCreation> PollCreations => Set<PollCreation>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<SetupLink> SetupLinks => Set<SetupLink>();
@@ -175,6 +176,19 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(l => l.CreatedAt).HasConversion(binaryTime);
             e.Property(l => l.UpdatedAt).HasConversion(binaryTime);
             e.HasIndex(l => l.OwnerId);
+        });
+
+        builder.Entity<PollReport>(e =>
+        {
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Id).ValueGeneratedNever();
+            e.HasOne(r => r.Poll).WithMany().HasForeignKey(r => r.PollId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(r => r.CreatedAt).HasConversion(binaryTime);
+            e.Property(r => r.HandledAt).HasConversion(binaryTime);
+            e.Property(r => r.Category).HasConversion<string>().HasMaxLength(20);
+            e.Property(r => r.State).HasConversion<string>().HasMaxLength(20);
+            e.HasIndex(r => new { r.State, r.PollId });
+            e.HasIndex(r => r.PollId);
         });
 
         builder.Entity<PollChange>(e =>

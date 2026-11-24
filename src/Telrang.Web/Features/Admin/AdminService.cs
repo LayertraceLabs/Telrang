@@ -16,7 +16,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Telrang.Web.Features.Admin;
 
 public sealed record AdminPollRow(string EncodedId, string Title, string OwnerEmail, PollType Type, int BallotCount,
-    bool IsClosed, bool ClosedManually, DateTimeOffset CreatedAt, int QuestionCount = 1, int PageCount = 1)
+    bool IsClosed, bool ClosedManually, DateTimeOffset CreatedAt, int QuestionCount = 1, int PageCount = 1, bool IsDisabled = false)
 {
     /// <summary>The type of a simple poll, the size of a structured one (DESIGN.md §34.1).</summary>
     public string Kind => Polls.PollText.KindLine(Type, QuestionCount, PageCount);
@@ -126,11 +126,18 @@ public sealed class AdminService(
     public async Task<bool> IsAdminAsync(ClaimsPrincipal caller) =>
         (await authorization.AuthorizeAsync(caller, AppPolicies.Admin)).Succeeded
         && users.GetUserId(caller) is { } id
-        && await AccountGate.MayActAsync(db, id)
+        && await IsAdminInDatabaseAsync(db, id);
+
+    /// <summary>
+    /// The database half of <see cref="IsAdminAsync"/>: the account may act and holds the admin role now. For callers that
+    /// know only a user id (<see cref="PollAccessService"/> deciding who may review a disabled poll, DESIGN.md §34.8).
+    /// </summary>
+    public static async Task<bool> IsAdminInDatabaseAsync(ApplicationDbContext db, string userId, CancellationToken ct = default) =>
+        await AccountGate.MayActAsync(db, userId, ct)
         && await (from ur in db.UserRoles
                   join r in db.Roles on ur.RoleId equals r.Id
-                  where ur.UserId == id && r.Name == AppRoles.Admin
-                  select ur.UserId).AnyAsync();
+                  where ur.UserId == userId && r.Name == AppRoles.Admin
+                  select ur.UserId).AnyAsync(ct);
 
     /// <summary>
     /// Writes the admin action log and the same line to the application log (pentest R2 Info c: the table keeps only the
@@ -138,12 +145,13 @@ public sealed class AdminService(
     /// account ids only: no notes (emails, poll titles), no poll ids (a poll's id is its link) and no blocked ranges
     /// (addresses).
     /// </summary>
-    private async Task LogAsync(ClaimsPrincipal caller, string action, string? targetType = null, string? targetId = null, string? note = null)
+    private async Task<long> LogAsync(ClaimsPrincipal caller, string action, string? targetType = null, string? targetId = null, string? note = null)
     {
         var adminId = users.GetUserId(caller) ?? "?";
-        await AdminLog.WriteAsync(db, time, emails, adminId, action, targetType, targetId, note);
+        var id = await AdminLog.WriteAsync(db, time, emails, adminId, action, targetType, targetId, note);
         logger.LogInformation("Admin {AdminId}: {Action} {TargetType} {TargetId}", adminId, action, targetType,
             targetType is "user" or "block" ? targetId : null);
+        return id;
     }
 
     public async Task<AdminStats?> GetStatsAsync(ClaimsPrincipal caller, CancellationToken ct = default)
@@ -162,11 +170,12 @@ public sealed class AdminService(
     {
         if (!await IsAdminAsync(caller)) return null;
         var rows = await db.Polls.AsNoTracking()
-            .Select(p => new { p.Id, p.Title, OwnerEmail = p.Owner!.Email, p.Type, Count = p.Ballots.Count, p.ClosedAt, p.ClosesAt, p.CreatedAt, p.QuestionCount, p.PageCount })
+            .Select(p => new { p.Id, p.Title, OwnerEmail = p.Owner!.Email, p.Type, Count = p.Ballots.Count, p.ClosedAt, p.ClosesAt, p.CreatedAt, p.QuestionCount, p.PageCount, p.DisabledAt })
             .ToListAsync(ct);
         var now = time.GetUtcNow();
         return rows.Select(r => new AdminPollRow(PollId.Encode(r.Id), r.Title, emails.Display(r.OwnerEmail) ?? "(no email)", r.Type, r.Count,
-                PollState.IsClosed(r.ClosedAt, r.ClosesAt, now), r.ClosedAt is not null, r.CreatedAt, r.QuestionCount, r.PageCount))
+                PollState.IsClosed(r.ClosedAt, r.ClosesAt, now), r.ClosedAt is not null, r.CreatedAt, r.QuestionCount, r.PageCount,
+                r.DisabledAt is not null))
             .OrderByDescending(r => r.CreatedAt) // in memory: SQLite cannot ORDER BY DateTimeOffset
             .ToList();
     }
@@ -198,6 +207,73 @@ public sealed class AdminService(
         await tx.CommitAsync(ct);
         notifier.End(poll.Id);
         return new AdminOutcome(true, $"Deleted “{poll.Title}”.");
+    }
+
+    /// <summary>
+    /// Takes a poll down (DESIGN.md §34.8): <see cref="Poll.DisabledAt"/> set, so every visitor but the owner and admins gets
+    /// 410 and nobody votes; open live views end; the poll's open reports become <see cref="ReportState.Acted"/>, pointing at
+    /// this log entry; the owner gets one mail (when mail is configured) naming the poll and what stays, nothing of any
+    /// report. Reversible with <see cref="EnablePollAsync"/>.
+    /// </summary>
+    public async Task<AdminOutcome> DisablePollAsync(ClaimsPrincipal caller, string encodedId, CancellationToken ct = default)
+    {
+        if (!await IsAdminAsync(caller)) return AdminOutcome.Denied;
+        string title, ownerId;
+        await using (var tx = await db.Database.BeginWriteAsync(ct))
+        {
+            var poll = await access.GetForAdminAsync(db, encodedId, tracking: true, ct);
+            if (poll is null) return AdminOutcome.NotFound;
+            if (poll.DisabledAt is not null) return new AdminOutcome(false, $"“{poll.Title}” is already disabled.");
+            var now = time.GetUtcNow();
+            poll.DisabledAt = now;
+            poll.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            var logId = await LogAsync(caller, "poll.disable", "poll", encodedId, poll.Title);
+            var pollId = poll.Id;
+            await db.PollReports.Where(r => r.PollId == pollId && r.State == ReportState.Open)
+                .ExecuteUpdateAsync(u => u.SetProperty(r => r.State, ReportState.Acted).SetProperty(r => r.HandledAt, now)
+                    .SetProperty(r => r.HandledLogId, logId), ct);
+            await tx.CommitAsync(ct);
+            notifier.End(pollId);
+            (title, ownerId) = (poll.Title, poll.OwnerId);
+        }
+        await MailDisabledOwnerAsync(ownerId, title, ct);
+        return new AdminOutcome(true, $"Disabled “{title}”.");
+    }
+
+    /// <summary>
+    /// Undoes <see cref="DisablePollAsync"/>: the poll is available again as before, and the reports acted on are open again for
+    /// a decision (dismiss, or disable again).
+    /// </summary>
+    public async Task<AdminOutcome> EnablePollAsync(ClaimsPrincipal caller, string encodedId, CancellationToken ct = default)
+    {
+        if (!await IsAdminAsync(caller)) return AdminOutcome.Denied;
+        await using var tx = await db.Database.BeginWriteAsync(ct);
+        var poll = await access.GetForAdminAsync(db, encodedId, tracking: true, ct);
+        if (poll is null) return AdminOutcome.NotFound;
+        if (poll.DisabledAt is null) return new AdminOutcome(false, $"“{poll.Title}” is not disabled.");
+        poll.DisabledAt = null;
+        poll.UpdatedAt = time.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        var pollId = poll.Id;
+        await db.PollReports.Where(r => r.PollId == pollId && r.State == ReportState.Acted)
+            .ExecuteUpdateAsync(u => u.SetProperty(r => r.State, ReportState.Open).SetProperty(r => r.HandledAt, (DateTimeOffset?)null)
+                .SetProperty(r => r.HandledLogId, (long?)null), ct);
+        await LogAsync(caller, "poll.enable", "poll", encodedId, poll.Title);
+        await tx.CommitAsync(ct);
+        notifier.Changed(pollId);
+        return new AdminOutcome(true, $"Enabled “{poll.Title}”.");
+    }
+
+    /// <summary>The owner's one mail about a disabled poll: its title and what stays. Never anything of a report.</summary>
+    private async Task MailDisabledOwnerAsync(string ownerId, string title, CancellationToken ct)
+    {
+        var owner = await db.Users.AsNoTracking().Where(u => u.Id == ownerId && u.DeletedAt == null && u.EmailConfirmed)
+            .Select(u => new { u.Email }).SingleOrDefaultAsync(ct);
+        if (emails.Reveal(owner?.Email) is not { } address || settings.MailLinkBase is not { } linkBase) return;
+        var body = $"“{title}” was disabled by an admin of {settings.AppName}. Voters see that it is unavailable, and nobody can vote.\n\n"
+                   + $"Its results and ballots can still be downloaded, and it can be deleted: {linkBase}polls\n";
+        await mail.EnqueueAsync(address, $"Poll disabled: {title}", body, MailType.PollDisabled, ct: ct);
     }
 
     /// <summary>

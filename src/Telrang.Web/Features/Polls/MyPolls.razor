@@ -33,7 +33,14 @@ else
                 <div class="d-flex flex-wrap justify-content-between gap-2">
                     @* Owners land on the results (DESIGN.md §24.3); "Vote" opens the ballot. *@
                     <a class="fw-semibold fs-5 text-break" href="p/@p.EncodedId/results" data-enhance-nav="false">@p.Title</a>
-                    <span class="badge @(p.IsClosed ? "text-bg-secondary" : "badge-open") align-self-start">@(p.IsClosed ? "Closed" : "Open")</span>
+                    @if (p.IsDisabled)
+                    {
+                        <span class="badge text-bg-danger align-self-start" title="@MyPolls.DisabledTitle">Disabled</span>
+                    }
+                    else
+                    {
+                        <span class="badge @(p.IsClosed ? "text-bg-secondary" : "badge-open") align-self-start">@(p.IsClosed ? "Closed" : "Open")</span>
+                    }
                 </div>
                 <div class="small text-secondary mb-2">
                     @p.Kind · @p.BallotCount @(p.BallotCount == 1 ? "vote" : "votes") · created @PollText.Date(p.CreatedAt)
@@ -69,6 +76,9 @@ else
 }
 
 @code {
+    /// <summary>Why the poll is disabled and what stays (DESIGN.md §34.8), on the badge.</summary>
+    public const string DisabledTitle = "Disabled by an admin: unavailable to voters. Export and delete stay.";
+
     [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
     private IReadOnlyList<PollSummary>? polls;
     private string? confirmDelete, statusMessage;

@@ -462,7 +462,7 @@ public sealed class BallotService(
         foreach (var group in rows.GroupBy(r => r.PollId))
         {
             var a = await access.GetAsync(db, PollId.Encode(group.Key), VisitorContext.ForUser(userId), tracking: false, ct);
-            if (a is null) continue;
+            if (a is null || a.Unavailable) continue; // disabled by an admin (DESIGN.md §34.8): not listed while it lasts
             // Invite poll and the account holds no ballot as itself: its ballots were detached by a revoke.
             var revoked = a.Poll.VoterMode == VoterMode.Invite && !a.HasBallot && !a.IsOwner;
             result.Add(new MyVoteSummary(a.EncodedId, a.Definition.Title, a.Definition.Questions[0].Type, a.IsClosed, group.Count(),

@@ -7,7 +7,8 @@ namespace Telrang.Web.Features.Looks;
 
 /// <summary>
 /// <c>GET /p/{id}/look.css</c> (DESIGN.md §34.6): the poll's look as <c>--av-*</c> token overrides and nothing else, for
-/// whoever may view the poll (<see cref="PollAccessService"/>; unknown or not viewable = 404, as the page). 404 too while
+/// whoever may view the poll (<see cref="PollAccessService"/>; unknown or not viewable = 404, as the page; disabled = 410 for
+/// everyone but the owner and admins, as the page). 404 too while
 /// the admin setting is off and for a poll without a look. Long private cache when <c>?v=</c> is the current hash, else
 /// <c>no-cache</c>. <c>GET /looks/preview.css?c=&lt;look code&gt;</c>: the look forms' preview sheet, for signed-in
 /// accounts; the code goes through the look rules like any other, so a refused code is a 404.
@@ -21,9 +22,9 @@ public static class LookEndpoints
         endpoints.MapGet("/p/{id}/look.css", async (string id, HttpContext http, PollAccessService access, LookStyles styles,
                 UserManager<ApplicationUser> users) =>
             {
-                if (!styles.Enabled) return Microsoft.AspNetCore.Http.Results.NotFound();
                 var a = await access.GetAsync(id, VisitorContext.ForUser(users.GetUserId(http.User)), http.RequestAborted);
-                if (a is null || !a.CanView || styles.Shown(a.Poll) is not { } look) return Microsoft.AspNetCore.Http.Results.NotFound();
+                if (a is { Unavailable: true }) return Polls.PollUnavailable.Result(); // DESIGN.md §34.8
+                if (!styles.Enabled || a is null || !a.CanView || styles.Shown(a.Poll) is not { } look) return Microsoft.AspNetCore.Http.Results.NotFound();
                 var (css, version) = styles.PollCss(look);
                 var headers = http.Response.Headers;
                 headers.XContentTypeOptions = "nosniff";

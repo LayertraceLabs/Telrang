@@ -17,7 +17,17 @@
 @inject NavigationManager Nav
 @inject VoteCarry Carry
 
-@if (access is { } a)
+@if (access is { Unavailable: true })
+{
+    <PollUnavailable />
+    @if (isPost)
+    {
+        @* A post to a disabled poll gets the same 410; the named forms exist so the framework finds them, and their handlers do nothing. *@
+        <form method="post" action="@FormAction" @formname="@VoteForm" @onsubmit="VoteAsync" hidden></form>
+        <form method="post" action="@FormAction" @formname="@DeleteForm" @onsubmit="DeleteAsync" hidden></form>
+    }
+}
+else if (access is { } a)
 {
     <PageTitle>@a.Definition.Title - @AppOptions.Value.Name</PageTitle>
     <PollHead Access="a">
@@ -33,6 +43,10 @@
     var last = pageNo >= pages.Count;
     <h1 class="text-break mb-1">@d.Title</h1>
     <PollRules Definition="d" IsClosed="a.IsClosed" ClosesAt="a.Poll.ClosesAt" AutoClose="a.Poll.AutoClose" ZoneId="@zone" />
+    @if (a.IsDisabled)
+    {
+        <p class="small"><span class="badge text-bg-danger" title="@PollAccessService.DisabledMessage">Disabled</span></p>
+    }
     @if (a.IsOwner)
     {
         <p class="small"><span class="badge text-bg-info">Your poll</span>
@@ -404,6 +418,7 @@
             if (!InviteTokens.TryHash(InviteToken, out var hash)) { Nav.NotFound(); return; }
             var withToken = await AccessService.GetAsync(Id, visitor with { InviteTokenHash = hash }, Http.RequestAborted);
             if (withToken is null) { Nav.NotFound(); return; }
+            if (withToken.Unavailable) { access = withToken; PollUnavailable.Answer(Http); return; } // no cookie for a disabled poll
             if (withToken.Poll.VoterMode == VoterMode.Invite)
             {
                 // A token the poll does not know is a 404. An account that claimed its invitation needs no cookie
@@ -419,6 +434,7 @@
 
         access = await AccessService.GetAsync(Id, visitor, Http.RequestAborted);
         if (access is null) { Nav.NotFound(); return; }
+        if (access.Unavailable) { PollUnavailable.Answer(Http); return; } // DESIGN.md §34.8: 410, nothing of the poll
         signedIn = userId is not null;
         simple = VoteLayout.IsSimple(access.Definition);
         pages = VoteLayout.Pages(access.Definition);
@@ -602,7 +618,7 @@
     /// </summary>
     private async Task VoteAsync()
     {
-        if (access is null) return;
+        if (access is null or { Unavailable: true }) return;
         var form = await Http.Request.ReadFormAsync(Http.RequestAborted);
         var nav = BallotForm.Value(form, NavField);
         if (nav == NavDiscard)
@@ -719,7 +735,7 @@
     /// <summary>The "delete" form: Delete… asks (second render), Delete in that render deletes.</summary>
     private async Task DeleteAsync()
     {
-        if (access is null) return;
+        if (access is null or { Unavailable: true }) return;
         var form = await Http.Request.ReadFormAsync(Http.RequestAborted);
         if (PositiveInt(BallotForm.Value(form, BallotForm.ConfirmField)) is int n)
         {

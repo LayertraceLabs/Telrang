@@ -22,7 +22,7 @@ public sealed record PollSaveResult(PollSaveStatus Status, string? EncodedId, IR
 }
 
 public sealed record PollSummary(string EncodedId, string Title, PollType Type, int BallotCount, bool IsClosed, DateTimeOffset CreatedAt,
-    int QuestionCount = 1, int PageCount = 1)
+    int QuestionCount = 1, int PageCount = 1, bool IsDisabled = false)
 {
     /// <summary>The type of a simple poll, the size of a structured one (DESIGN.md §34.1).</summary>
     public string Kind => PollText.KindLine(Type, QuestionCount, PageCount);
@@ -240,6 +240,7 @@ public sealed class PollService(
         if (!await AccountGate.MayActAsync(db, userId, ct)) return new EditPass(SetupRequired());
         var a = await access.GetAsync(db, encodedId, VisitorContext.ForUser(userId), tracking: false, ct);
         if (a is null || !a.CanEdit) return new EditPass(new PollSaveResult(PollSaveStatus.NotFound, null, []));
+        if (a.IsDisabled) return new EditPass(Disabled(a.EncodedId));
 
         var ownerLimits = await UserLimits.ForUserAsync(db, settings.Current.Limits, a.Poll.OwnerId, time.GetUtcNow(), ct);
         // The duration limit applies only to a changed close date (a transferred poll keeps its own).
@@ -262,6 +263,13 @@ public sealed class PollService(
         return new EditPass(null, a.EncodedId, a.Poll.DefinitionJson, a.Definition, updated, ownerLimits, count, changes, answers);
     }
 
+    /// <summary>
+    /// DESIGN.md §34.8: a disabled poll is frozen for its owner (no edit, no reopening, no new invite links) until an admin
+    /// enables it; export and delete stay.
+    /// </summary>
+    private static PollSaveResult Disabled(string encodedId) =>
+        new(PollSaveStatus.Invalid, encodedId, [], PollAccessService.DisabledMessage);
+
     /// <summary>The write of an edit under the write transaction, or null when the poll moved since the pass (try again).</summary>
     private async Task<PollSaveResult?> WriteEditAsync(string userId, EditPass pass, bool last, CancellationToken ct)
     {
@@ -270,6 +278,7 @@ public sealed class PollService(
         if (!await AccountGate.MayActAsync(db, userId, ct)) return SetupRequired();
         var a = await access.GetAsync(db, pass.EncodedId, VisitorContext.ForUser(userId), tracking: true, ct);
         if (a is null || !a.CanEdit) return new PollSaveResult(PollSaveStatus.NotFound, null, []);
+        if (a.IsDisabled) return Disabled(a.EncodedId);
         var poll = a.Poll;
         var ballots = await db.Ballots.CountAsync(b => b.PollId == poll.Id, ct);
         // Another save of the definition can only come from another session of the owner; ballots come and go any time.
@@ -462,13 +471,13 @@ public sealed class PollService(
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var rows = await db.Polls.AsNoTracking()
             .Where(p => p.OwnerId == userId)
-            .Select(p => new { p.Id, p.Title, p.Type, p.ClosedAt, p.ClosesAt, p.CreatedAt, Count = p.Ballots.Count, p.QuestionCount, p.PageCount })
+            .Select(p => new { p.Id, p.Title, p.Type, p.ClosedAt, p.ClosesAt, p.CreatedAt, Count = p.Ballots.Count, p.QuestionCount, p.PageCount, p.DisabledAt })
             .ToListAsync(ct);
         var now = time.GetUtcNow();
         // DateTimeOffset ordering is done in memory: SQLite cannot ORDER BY it.
         return rows
             .Select(r => new PollSummary(PollId.Encode(r.Id), r.Title, r.Type, r.Count, PollState.IsClosed(r.ClosedAt, r.ClosesAt, now), r.CreatedAt,
-                r.QuestionCount, r.PageCount))
+                r.QuestionCount, r.PageCount, r.DisabledAt is not null))
             .OrderByDescending(r => r.CreatedAt)
             .ToList();
     }
@@ -484,6 +493,7 @@ public sealed class PollService(
         if (!await AccountGate.MayActAsync(db, userId, ct)) return (false, null);
         var a = await access.GetAsync(db, encodedId, VisitorContext.ForUser(userId), tracking: true, ct);
         if (a is null || !a.CanEdit) return (false, null);
+        if (!closed && a.IsDisabled) return (false, PollAccessService.DisabledMessage);
         var now = time.GetUtcNow();
         if (!closed && a.Poll.ClosedAt is not null && !PollState.IsClosed(null, a.Poll.ClosesAt, now))
         {
@@ -533,6 +543,7 @@ public sealed class PollService(
         if (!await AccountGate.MayActAsync(db, userId, ct)) return (null, null);
         var a = await access.GetAsync(db, encodedId, VisitorContext.ForUser(userId), tracking: false, ct);
         if (a is null || !a.CanEdit) return (null, null);
+        if (a.IsDisabled) return (null, PollAccessService.DisabledMessage);
 
         var limits = await UserLimits.ForUserAsync(db, settings.Current.Limits, a.Poll.OwnerId, time.GetUtcNow(), ct);
         if (limits.InvitesPerPoll > 0)
@@ -661,6 +672,7 @@ public sealed class PollService(
     {
         if (pollIds.Count == 0) return 0;
         await DeleteDraftsAsync(db, pollIds, ct);
+        await db.PollReports.Where(r => pollIds.Contains(r.PollId)).ExecuteDeleteAsync(ct); // DESIGN.md §34.8
         await db.PollChanges.Where(c => pollIds.Contains(c.PollId)).ExecuteDeleteAsync(ct);
         await db.InviteTokens.Where(t => pollIds.Contains(t.PollId)).ExecuteDeleteAsync(ct);
         await db.Ballots.Where(b => pollIds.Contains(b.PollId)).ExecuteDeleteAsync(ct);

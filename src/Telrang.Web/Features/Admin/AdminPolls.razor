@@ -15,6 +15,13 @@
                 Ballots, invite links and aliases stay. The old owner loses owner access (owner-only results included) and
                 "Email me when this poll closes" is cleared on his own ballots in it; an open live results view of his ends.
                 The close date stays; the new owner's duration limit applies only when it changes. Takes a tick box.</li>
+            <li><em>Disable</em>: takes the poll down. Everyone but its owner and admins gets "This poll is unavailable."
+                (HTTP 410) on every page of it, nobody can vote, and an owner's open live view ends. The owner still sees it
+                marked Disabled, cannot edit, reopen or create invite links, and can still download and delete it. The owner
+                gets one mail (when mail is configured) naming the poll, nothing of any report. Its open reports count as acted
+                on.</li>
+            <li><em>Enable</em>: makes a disabled poll available again as before; reports acted on by the disabling are open
+                again on the Reports tab.</li>
             <li><em>Delete…</em>: deletes the poll with its ballots and invite links at once. The owner is not told. No undo
                 except a backup. Takes a tick box.</li>
         </ul>
@@ -39,6 +46,10 @@ else
                         <a class="fw-semibold" href="p/@p.EncodedId" data-enhance-nav="false">@p.Title</a>
                         <div class="small text-secondary">
                             <span class="badge @(p.IsClosed ? "text-bg-secondary" : "badge-open") me-1">@(p.IsClosed ? "Closed" : "Open")</span>
+                            @if (p.IsDisabled)
+                            {
+                                <span class="badge text-bg-danger me-1">Disabled</span>
+                            }
                             @p.Kind · @p.BallotCount @(p.BallotCount == 1 ? "ballot" : "ballots") · by @p.OwnerEmail · created @PollText.Date(p.CreatedAt)
                         </div>
                     </div>
@@ -50,6 +61,14 @@ else
                         else if (!p.IsClosed)
                         {
                             <button class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.SetPollClosedAsync(c, p.EncodedId, true))">Close</button>
+                        }
+                        @if (p.IsDisabled)
+                        {
+                            <button class="btn btn-sm btn-outline-success" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.EnablePollAsync(c, p.EncodedId))">Enable</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-danger" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.DisablePollAsync(c, p.EncodedId))">Disable</button>
                         }
                         @if (transferring != p.EncodedId)
                         {

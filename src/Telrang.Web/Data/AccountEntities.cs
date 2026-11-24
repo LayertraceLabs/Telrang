@@ -54,6 +54,10 @@ public enum MailType
     SecurityNotice,
     /// <summary>"Someone tried to register with your address" to an existing account (pentest AV-10).</summary>
     RegistrationAttempt,
+    /// <summary>"Your poll was disabled" to its owner (DESIGN.md §34.8).</summary>
+    PollDisabled,
+    /// <summary>"A poll was reported" to the admins (DESIGN.md §34.8): no poll, report text or contact in it.</summary>
+    ReportReceived,
 }
 
 /// <summary>

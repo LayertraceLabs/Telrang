@@ -16,10 +16,11 @@ public static class AdminLog
     /// Appends one entry and trims the table to <see cref="MaxRows"/> (oldest first). The note (it often names an account's
     /// address) is stored encrypted (DESIGN.md §30).
     /// </summary>
-    public static async Task WriteAsync(ApplicationDbContext db, TimeProvider time, EmailProtection emails, string adminUserId, string action,
+    /// <returns>The new entry's id (a poll report keeps it as the decision's reference, DESIGN.md §34.8).</returns>
+    public static async Task<long> WriteAsync(ApplicationDbContext db, TimeProvider time, EmailProtection emails, string adminUserId, string action,
         string? targetType = null, string? targetId = null, string? note = null, CancellationToken ct = default)
     {
-        db.AdminActionLogs.Add(new AdminActionLog
+        var entry = new AdminActionLog
         {
             At = time.GetUtcNow(),
             AdminUserId = adminUserId,
@@ -27,7 +28,8 @@ public static class AdminLog
             TargetType = targetType,
             TargetId = targetId,
             Note = note is null ? null : emails.Protect(note is { Length: > 500 } ? note[..500] : note),
-        });
+        };
+        db.AdminActionLogs.Add(entry);
         await db.SaveChangesAsync(ct);
 
         var count = await db.AdminActionLogs.CountAsync(ct);
@@ -36,6 +38,7 @@ public static class AdminLog
             var cutoff = await db.AdminActionLogs.OrderByDescending(l => l.Id).Skip(MaxRows).Select(l => l.Id).FirstAsync(ct);
             await db.AdminActionLogs.Where(l => l.Id <= cutoff).ExecuteDeleteAsync(ct);
         }
+        return entry.Id;
     }
 
     /// <summary>Newest first; <paramref name="page"/> is 0-based.</summary>

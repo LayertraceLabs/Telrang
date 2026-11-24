@@ -48,6 +48,10 @@
                 {
                     <span class="badge badge-open">Open</span>
                 }
+                @if (a.IsDisabled)
+                {
+                    <span class="badge text-bg-danger ms-1" title="@MyPolls.DisabledTitle">Disabled</span>
+                }
                 @if (a.Poll.ClosesAt is { } closes)
                 {
                     @* Closed by its date (a.IsClosed comes from PollState with the injected clock): a later close date reopens it. *@
@@ -55,11 +59,12 @@
                     <span class="small ms-2 close-line" title="@(byDate ? "A later close date reopens it" : a.Poll.AutoClose ? "Maximum poll duration" : null)">@(byDate ? "Closed" : "Closes") @PollTime.Format(closes, viewerZone)@(viewerZone != PollZone(a) ? $" (poll time zone {PollZone(a)})" : "")</span>
                 }
             </p>
-            @if (a.Poll.ClosedAt is not null)
+            @* DESIGN.md §34.8: a disabled poll offers neither (no reopening; nobody votes anyway). *@
+            @if (!a.IsDisabled && a.Poll.ClosedAt is not null)
             {
                 <button type="button" class="btn btn-outline-success" disabled="@busy" @onclick="() => SetClosedAsync(false)">Reopen poll</button>
             }
-            else if (!a.IsClosed)
+            else if (!a.IsDisabled && !a.IsClosed)
             {
                 <button type="button" class="btn btn-outline-danger" disabled="@busy" @onclick="() => SetClosedAsync(true)">Close poll now</button>
             }
