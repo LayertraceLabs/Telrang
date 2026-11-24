@@ -11,7 +11,7 @@
             var value = Values.PointsOf(key);
             <li class="card points-card" data-key="@key" data-label="@o.Label" @key="key">
                 <div class="card-body">
-                    <h2 class="h6 fw-semibold mb-1 text-break" id="lbl-@key">@o.Label</h2>
+                    <h2 class="h6 fw-semibold mb-1 text-break" id="@Values.Id("lbl-" + key)">@o.Label</h2>
                     @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
                     {
                         <div class="poll-markdown small text-secondary mb-2">@MarkdownRenderer.Render(o.DescriptionMarkdown)</div>
@@ -19,14 +19,14 @@
                     <div class="points-controls">
                         <button type="button" class="btn btn-outline-secondary points-btn" data-step="-5" hidden aria-label="Remove 5 points from @o.Label">−5</button>
                         <button type="button" class="btn btn-outline-secondary points-btn" data-step="-1" hidden aria-label="Remove 1 point from @o.Label">−1</button>
-                        <label class="visually-hidden" for="pts-@key">Points for @o.Label</label>
-                        <input id="pts-@key" name="@(Preview ? null : BallotForm.Field(key))" data-field="@BallotForm.Field(key)" class="form-control form-control-lg points-input" type="number" inputmode="numeric"
+                        <label class="visually-hidden" for="@Values.Id("pts-" + key)">Points for @o.Label</label>
+                        <input id="@Values.Id("pts-" + key)" name="@(Preview ? null : Values.F(key))" data-field="@Values.F(key)" class="form-control form-control-lg points-input" type="number" inputmode="numeric"
                                min="0" max="@cap" step="1" value="@(Values.Points.GetValueOrDefault(key) ?? "0")" />
                         <button type="button" class="btn btn-outline-primary points-btn" data-step="1" hidden aria-label="Add 1 point to @o.Label">+1</button>
                         <button type="button" class="btn btn-outline-primary points-btn" data-step="5" hidden aria-label="Add 5 points to @o.Label">+5</button>
                     </div>
-                    <label class="visually-hidden" for="rng-@key">Points for @o.Label (slider)</label>
-                    <input id="rng-@key" class="form-range points-range" type="range" min="0" max="@cap" step="1" value="@Math.Clamp(value, 0, cap)" hidden />
+                    <label class="visually-hidden" for="@Values.Id("rng-" + key)">Points for @o.Label (slider)</label>
+                    <input id="@Values.Id("rng-" + key)" class="form-range points-range" type="range" min="0" max="@cap" step="1" value="@Math.Clamp(value, 0, cap)" hidden />
                     <div class="small text-danger points-hint" data-hint></div>
                 </div>
             </li>

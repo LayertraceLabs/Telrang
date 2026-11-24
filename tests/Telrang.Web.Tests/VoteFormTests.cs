@@ -439,8 +439,8 @@ public partial class VoteFormTests
         var browser = factory.CreateBrowser();
         var html = await PageAsync(browser, $"/p/{id}");
 
-        // 70 values of 1 kB: under the value count, over the 64 kB body.
-        var big = Enumerable.Range(0, 70).ToDictionary(i => $"x{i}", _ => new string('a', 1024));
+        // Values of 1 kB: under the value count, over the body limit (a page's fields plus a full carry field, DESIGN.md §34.4).
+        var big = Enumerable.Range(0, VoteFormLimits.MaxBodyBytes / 1024 + 10).ToDictionary(i => $"x{i}", _ => new string('a', 1024));
         var tooLarge = await PostAsync(browser, id, html, VotePage.VoteForm, big);
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, tooLarge.StatusCode);
         Assert.Contains("Form too large", await tooLarge.Content.ReadAsStringAsync());

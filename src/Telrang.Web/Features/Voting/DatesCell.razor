@@ -33,7 +33,7 @@ else
             @foreach (var a in Order)
             {
                 var id = $"{IdPrefix}-{DatesFormat.Word(a)}";
-                <input type="radio" class="dates-pick-input" id="@id" name="@(Preview ? null : BallotForm.Field(Option.Key))" data-field="@BallotForm.Field(Option.Key)" value="@DatesFormat.Word(a)"
+                <input type="radio" class="dates-pick-input" id="@id" name="@(Preview ? null : Prefix + BallotForm.Field(Option.Key))" data-field="@(Prefix + BallotForm.Field(Option.Key))" value="@DatesFormat.Word(a)"
                        checked="@(Active && a == Value)" />
                 <label class="@(Compact ? "dates-pick-opt" : "dates-seg-btn") dates-seg-@DatesFormat.Word(a)" for="@id">
                     <Icon Name="@DatesFormat.IconName(a)" />
@@ -78,7 +78,10 @@ else
 
     private bool Compact => View != DatesView.List;
     private string Word => DatesFormat.Word(Value);
-    private string IdPrefix => $"d-{BallotForm.ViewValue(View)}-{Option.Key}";
+    /// <summary>The question's field prefix in a poll with several questions (DESIGN.md §34.4); empty in a simple poll.</summary>
+    [Parameter] public string Prefix { get; set; } = "";
+
+    private string IdPrefix => $"{Prefix.Replace('.', '-')}d-{BallotForm.ViewValue(View)}-{Option.Key}";
     private Availability[] Order => AllowMaybe ? [Availability.Yes, Availability.Maybe, Availability.No] : [Availability.Yes, Availability.No];
 
     private static string Capital(Availability a) => a switch

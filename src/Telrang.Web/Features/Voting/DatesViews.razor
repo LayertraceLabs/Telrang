@@ -22,7 +22,7 @@
         <div class="dates-switch" role="group" aria-label="View">
             @foreach (var v in AllViews)
             {
-                <button type="submit" class="dates-switch-btn dates-switch-@Css(v) @(v == shown ? "active" : "")" name="@BallotForm.ViewField"
+                <button type="submit" class="dates-switch-btn dates-switch-@Css(v) @(v == shown ? "active" : "")" name="@ViewName"
                         value="@Css(v)" formnovalidate aria-pressed="@(v == shown ? "true" : "false")" data-view="@Css(v)"><Icon Name="@IconOf(v)" /> @v</button>
             }
         </div>
@@ -140,6 +140,8 @@
     [Parameter] public DatesView? FormView { get; set; }
     /// <summary>With <see cref="FormView"/>: the home page example, no form; the switcher is plain buttons (dates.js).</summary>
     [Parameter] public bool Preview { get; set; }
+    /// <summary>With <see cref="FormView"/>: the name of the switcher's submit buttons (the question's field prefix + "view").</summary>
+    [Parameter] public string ViewName { get; set; } = BallotForm.ViewField;
 
     private bool Hidden(DatesView v) => FormView is { } shown && shown != v;
 

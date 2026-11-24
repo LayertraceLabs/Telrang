@@ -69,7 +69,7 @@ public static class PollText
         OptionChangeKind.TitleChanged => $"Title changed: “{oldLabel}” → “{label}”",
         OptionChangeKind.DescriptionChanged => "Description changed",
         OptionChangeKind.Earlier => EarlierChanges(ballotCount ?? 0),
-        OptionChangeKind.QuestionAdded or OptionChangeKind.QuestionRemoved or OptionChangeKind.QuestionRenamed => throw new NotSupportedException(), // §34 step 2
+        OptionChangeKind.QuestionAdded or OptionChangeKind.QuestionRemoved or OptionChangeKind.QuestionRenamed => throw new NotSupportedException(), // §34 step 4
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -98,6 +98,29 @@ public static class PollText
     /// <summary>The rules as one line under the poll title (details go behind "How scoring works").</summary>
     public static string RulesLine(PollQuestion d)
     {
+        switch (d.Type)
+        {
+            case PollType.Ranked or PollType.Points or PollType.Dates:
+                break;
+            case PollType.Choice:
+                return d.MaxSelect <= 1 ? "Pick one." : d.MinSelect == d.MaxSelect ? $"Pick {d.MaxSelect}." : $"Pick {d.MinSelect} to {d.MaxSelect}.";
+            case PollType.Text:
+                return "";
+            case PollType.Number:
+            {
+                var unit = d.Unit.Length == 0 ? "" : " " + d.Unit;
+                static string N(decimal v) => new Telrang.Core.Ballots.NumberBallot(v).ToInvariantString();
+                return (d.Min, d.Max) switch
+                {
+                    ({ } lo, { } hi) => $"From {N(lo)} to {N(hi)}{unit}.",
+                    ({ } lo, null) => $"{N(lo)}{unit} or more.",
+                    (null, { } hi) => $"{N(hi)}{unit} or less.",
+                    _ => "",
+                };
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(d), d.Type, null);
+        }
         if (d.Type == PollType.Dates) return d.Maybe ? "Answer yes, maybe or no per date." : "Answer yes or no per date.";
         if (d.Type == PollType.Points)
         {
@@ -116,6 +139,7 @@ public static class PollText
     public static IReadOnlyList<string> ScoringDetails(PollQuestion d)
     {
         var lines = new List<string>();
+        if (d.Type is PollType.Choice or PollType.Text or PollType.Number) return lines; // nothing is scored
         if (d.Type == PollType.Dates)
         {
             lines.Add(d.Maybe ? "Each date takes yes, maybe (if need be) or no. Unanswered dates count as no."

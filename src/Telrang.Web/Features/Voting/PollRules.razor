@@ -1,6 +1,15 @@
 @* The poll's rules as one line under the title, with the long form behind a disclosure (UI copy rules). *@
+@{
+    // A poll with several questions shows each question's rules with the question (QuestionInput).
+    var simple = VoteLayout.IsSimple(Definition);
+    var rules = simple ? PollText.RulesLine(Definition.Questions[0]) : "";
+    var details = simple ? PollText.ScoringDetails(Definition.Questions[0]) : [];
+}
 <p class="poll-rules small mb-1">
-    <span>@PollText.RulesLine(Definition.Questions[0])</span>
+    @if (rules.Length > 0)
+    {
+        <span>@rules</span>
+    }
     @if (IsClosed)
     {
         <span class="badge text-bg-secondary ms-1">Closed</span>
@@ -11,15 +20,18 @@
     }
 </p>
 <p class="small text-secondary mb-1 results-line">@PollText.ResultsLine(Definition)</p>
-<details class="small mb-3 poll-rules-details">
-    <summary>How scoring works</summary>
-    <ul class="mb-0 mt-1">
-        @foreach (var line in PollText.ScoringDetails(Definition.Questions[0]))
-        {
-            <li>@line</li>
-        }
-    </ul>
-</details>
+@if (details.Count > 0)
+{
+    <details class="small mb-3 poll-rules-details">
+        <summary>How scoring works</summary>
+        <ul class="mb-0 mt-1">
+            @foreach (var line in details)
+            {
+                <li>@line</li>
+            }
+        </ul>
+    </details>
+}
 
 @code {
     [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;

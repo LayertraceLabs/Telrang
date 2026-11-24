@@ -32,7 +32,16 @@ public sealed record MyBallot(int ResponseNo, RankedBallot? Ranked, PointsBallot
 
     /// <summary>"Email me when this poll closes" is ticked on this response.</summary>
     public bool NotifyOnClose { get; init; }
+
+    /// <summary>
+    /// Every question's answer (DESIGN.md §34.3), with the voter's own free text decrypted; a question without an entry was
+    /// not answered. <see cref="Ranked"/>, <see cref="Points"/> and <see cref="Dates"/> are the first question's.
+    /// </summary>
+    public IReadOnlyDictionary<string, QuestionAnswer> Answers { get; init; } = new Dictionary<string, QuestionAnswer>();
 }
+
+/// <summary>A signed-in voter's unfinished answers (DESIGN.md §34.4): the carry content and when it was saved.</summary>
+public sealed record ResponseDraftState(CarryState State, DateTimeOffset SavedAt);
 
 /// <param name="Responses">The visitor's own responses, by response number (at most one under <c>responses: one</c>).</param>
 public sealed record VoteState(PollAccess Access, IReadOnlyList<MyBallot> Responses)
@@ -75,6 +84,7 @@ public sealed class BallotService(
     AppMetrics metrics,
     VoteFormIds formIds,
     Results.PollChangeNotifier notifier,
+    ResponseTextProtection textProtection,
     ILogger<BallotService> logger)
 {
     /// <summary>Oldest vote form stamp accepted (DESIGN.md §21.1): a form left open over a working day still works.</summary>
@@ -108,7 +118,10 @@ public sealed class BallotService(
             .Where(b => b.PollId == a.Poll.Id && b.VoterIdentity == identity)
             .OrderBy(b => b.ResponseNo)
             .ToListAsync(ct);
-        return new VoteState(a, rows.Select(r => ToMyBallot(a.Definition, r)).ToList()) { CanNotify = canNotify };
+        return new VoteState(a, rows.Select(r => ToMyBallot(a.Definition, r, textProtection.RevealTexts(a.Poll.Id, r.TextCipher))).ToList())
+        {
+            CanNotify = canNotify,
+        };
     }
 
     /// <summary>
@@ -126,34 +139,88 @@ public sealed class BallotService(
 
     /// <param name="responseNo"><c>responses: many</c>: the response to revise, or null for a new one. Ignored under <c>one</c>.</param>
     /// <param name="notifyOnClose">"Email me when this poll closes"; stored only when <see cref="MayNotifyAsync"/> allows it.</param>
-    public async Task<SubmitResult> SubmitRankedAsync(string encodedId, VisitorContext visitor, RankedBallot ballot, string? displayName,
-        int? responseNo = null, BallotGuard? guard = null, bool notifyOnClose = false, CancellationToken ct = default)
-    {
-        ballot = new RankedBallot(ballot.Ranked.ToList(), ballot.Banned.ToList());
-        return await SubmitAsync(encodedId, visitor, displayName, responseNo, guard, notifyOnClose,
-            def => BallotValidator.Validate(def.Questions[0], ballot), def => PollJson.Serialize(def.Questions[0].Key, ballot), ct);
-    }
+    public Task<SubmitResult> SubmitRankedAsync(string encodedId, VisitorContext visitor, RankedBallot ballot, string? displayName,
+        int? responseNo = null, BallotGuard? guard = null, bool notifyOnClose = false, CancellationToken ct = default) =>
+        SubmitFirstAsync(encodedId, visitor, new QuestionAnswer { Ranked = ballot }, displayName, responseNo, guard, notifyOnClose, ct);
 
     /// <param name="responseNo"><c>responses: many</c>: the response to revise, or null for a new one. Ignored under <c>one</c>.</param>
     /// <param name="notifyOnClose">"Email me when this poll closes"; stored only when <see cref="MayNotifyAsync"/> allows it.</param>
-    public async Task<SubmitResult> SubmitPointsAsync(string encodedId, VisitorContext visitor, PointsBallot ballot, string? displayName,
-        int? responseNo = null, BallotGuard? guard = null, bool notifyOnClose = false, CancellationToken ct = default)
-    {
-        ballot = new PointsBallot(new Dictionary<string, int>(ballot.Points));
-        return await SubmitAsync(encodedId, visitor, displayName, responseNo, guard, notifyOnClose,
-            def => BallotValidator.Validate(def.Questions[0], ballot), def => PollJson.Serialize(def.Questions[0].Key, ballot), ct);
-    }
+    public Task<SubmitResult> SubmitPointsAsync(string encodedId, VisitorContext visitor, PointsBallot ballot, string? displayName,
+        int? responseNo = null, BallotGuard? guard = null, bool notifyOnClose = false, CancellationToken ct = default) =>
+        SubmitFirstAsync(encodedId, visitor, new QuestionAnswer { Points = ballot }, displayName, responseNo, guard, notifyOnClose, ct);
 
     /// <param name="responseNo"><c>responses: many</c>: the response to revise, or null for a new one. Ignored under <c>one</c>.</param>
     /// <param name="notifyOnClose">"Email me when this poll closes"; stored only when <see cref="MayNotifyAsync"/> allows it.</param>
-    public async Task<SubmitResult> SubmitDatesAsync(string encodedId, VisitorContext visitor, DatesBallot ballot, string? displayName,
-        int? responseNo = null, BallotGuard? guard = null, bool notifyOnClose = false, CancellationToken ct = default)
+    public Task<SubmitResult> SubmitDatesAsync(string encodedId, VisitorContext visitor, DatesBallot ballot, string? displayName,
+        int? responseNo = null, BallotGuard? guard = null, bool notifyOnClose = false, CancellationToken ct = default) =>
+        SubmitFirstAsync(encodedId, visitor, new QuestionAnswer { Dates = ballot }, displayName, responseNo, guard, notifyOnClose, ct);
+
+    /// <summary>An answer to the first question only (in-process callers of the one-question API, tests).</summary>
+    private async Task<SubmitResult> SubmitFirstAsync(string encodedId, VisitorContext visitor, QuestionAnswer answer, string? displayName,
+        int? responseNo, BallotGuard? guard, bool notifyOnClose, CancellationToken ct)
     {
-        // No answers are stored as absent keys: a missing key reads as no, so the payload stays small.
-        ballot = new DatesBallot(ballot.Answers.Where(a => a.Value != Availability.No)
-            .ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal));
-        return await SubmitAsync(encodedId, visitor, displayName, responseNo, guard, notifyOnClose,
-            def => BallotValidator.Validate(def.Questions[0], ballot), def => PollJson.Serialize(def.Questions[0].Key, ballot), ct);
+        var a = await access.GetAsync(encodedId, visitor, ct);
+        var answers = new Dictionary<string, QuestionAnswer>(StringComparer.Ordinal);
+        if (a is not null) answers[a.Definition.Questions[0].Key] = answer;
+        return await SubmitResponseAsync(encodedId, visitor, answers, displayName, responseNo, guard, notifyOnClose, ct);
+    }
+
+    /// <summary>
+    /// Writes a whole response (DESIGN.md §34.3, §34.4): every question's answer is checked against the current definition
+    /// ("Required" included) and the free text against the response limit; the scored parts go into
+    /// <see cref="Ballot.PayloadJson"/>, the free text encrypted into <see cref="Ballot.TextCipher"/>. One write transaction,
+    /// as for every ballot; a signed-in voter's draft for the response goes in the same transaction.
+    /// </summary>
+    /// <param name="answers">Per question key; questions the definition does not have and options it no longer has are ignored.</param>
+    public Task<SubmitResult> SubmitResponseAsync(string encodedId, VisitorContext visitor, IReadOnlyDictionary<string, QuestionAnswer> answers,
+        string? displayName, int? responseNo = null, BallotGuard? guard = null, bool notifyOnClose = false, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(answers);
+        var limits = PollParsing.LimitsFrom(settings.Current.Limits);
+        return SubmitAsync(encodedId, visitor, displayName, responseNo, guard, notifyOnClose,
+            def => ValidateResponse(def, Only(def, answers), limits),
+            (def, pollId) => (ResponseAnswers.Payload(def, Only(def, answers)), textProtection.ProtectTexts(pollId, ResponseAnswers.Texts(def, Only(def, answers)))),
+            ct);
+    }
+
+    /// <summary>The answers to the definition's questions, normalised (unknown questions dropped; unknown options stay, the validator names them).</summary>
+    private static Dictionary<string, QuestionAnswer> Only(PollDefinition def, IReadOnlyDictionary<string, QuestionAnswer> answers)
+    {
+        var only = new Dictionary<string, QuestionAnswer>(StringComparer.Ordinal);
+        foreach (var q in def.Questions)
+            if (ResponseAnswers.Normalize(q, answers.GetValueOrDefault(q.Key)) is { } a) only[q.Key] = a;
+        return only;
+    }
+
+    /// <summary>
+    /// Every question's errors and the free-text total; in a poll with several questions each message names its question
+    /// (<see cref="QuestionLabel"/>). The vote page runs the same check per page (<see cref="ValidatePage"/>).
+    /// </summary>
+    public static List<string> ValidateResponse(PollDefinition def, IReadOnlyDictionary<string, QuestionAnswer> answers, PollLimits limits)
+    {
+        var errors = ValidatePage(def, def.Questions, answers, limits, requireAnswers: true);
+        foreach (var e in ResponseText.Validate(def.Questions, ResponseAnswers.Texts(def, answers), limits)) errors.Add(e);
+        return errors;
+    }
+
+    /// <summary>The errors of <paramref name="questions"/> (a page), each naming its question unless the poll is simple.</summary>
+    public static List<string> ValidatePage(PollDefinition def, IEnumerable<PollQuestion> questions, IReadOnlyDictionary<string, QuestionAnswer> answers,
+        PollLimits limits, bool requireAnswers)
+    {
+        var simple = VoteLayout.IsSimple(def);
+        var errors = new List<string>();
+        foreach (var q in questions)
+            foreach (var e in ResponseAnswers.Validate(q, answers.GetValueOrDefault(q.Key), limits, requireAnswers))
+                errors.Add(simple ? e : $"{QuestionLabel(def, q)}: {e}");
+        return errors;
+    }
+
+    /// <summary>A question's name in messages: its prompt, else "Question N".</summary>
+    public static string QuestionLabel(PollDefinition def, PollQuestion q)
+    {
+        if (!string.IsNullOrWhiteSpace(q.Prompt)) return q.Prompt.Trim();
+        var i = def.Questions.ToList().FindIndex(x => x.Key == q.Key);
+        return $"Question {i + 1}";
     }
 
     /// <summary>Honeypot, form stamp and captcha. Null when the vote may proceed.</summary>
@@ -199,7 +266,8 @@ public sealed class BallotService(
     }
 
     private async Task<SubmitResult> SubmitAsync(string encodedId, VisitorContext visitor, string? displayName, int? responseNo, BallotGuard? guard,
-        bool notifyOnClose, Func<PollDefinition, IReadOnlyList<string>> validate, Func<PollDefinition, string> payload, CancellationToken ct)
+        bool notifyOnClose, Func<PollDefinition, IReadOnlyList<string>> validate, Func<PollDefinition, Guid, (string Payload, string? TextCipher)> payload,
+        CancellationToken ct)
     {
         if (await CheckBotAsync(encodedId, visitor, guard, ct) is { } botRefusal) return botRefusal;
         var formId = VoteFormIds.IsWellFormed(guard?.FormId) ? guard!.FormId : null;
@@ -253,6 +321,7 @@ public sealed class BallotService(
 
                 var notify = notifyOnClose && await MayNotifyAsync(db, a, visitor.UserId, ct);
                 var now = time.GetUtcNow();
+                var (payloadJson, textCipher) = payload(a.Definition, a.Poll.Id);
                 if (row is null)
                 {
                     var limits = await UserLimits.ForUserAsync(db, settings.Current.Limits, a.Poll.OwnerId, now, ct);
@@ -278,7 +347,8 @@ public sealed class BallotService(
                         UserId = voter.UserId,
                         VoterIdentity = identity,
                         ResponseNo = mine.Count == 0 ? 1 : mine.Max(b => b.ResponseNo) + 1,
-                        PayloadJson = payload(a.Definition),
+                        PayloadJson = payloadJson,
+                        TextCipher = textCipher,
                         DisplayName = name,
                         Alias = alias,
                         SubmittedAt = now,
@@ -289,7 +359,8 @@ public sealed class BallotService(
                 }
                 else
                 {
-                    row.PayloadJson = payload(a.Definition);
+                    row.PayloadJson = payloadJson;
+                    row.TextCipher = textCipher;
                     row.DisplayName = name;
                     row.UpdatedAt = now;
                     row.NotifyOnClose = notify;
@@ -308,6 +379,16 @@ public sealed class BallotService(
                 {
                     var ballotId = row.Id;
                     await TokenOf(db, a.Poll.Id, voter).ExecuteUpdateAsync(s => s.SetProperty(t => t.BallotId, ballotId), ct);
+                }
+                // The response is written: its draft goes (DESIGN.md §34.4). Under responses: one every draft of the account
+                // in the poll is for this response; under many, the one for the response edited (0 = new).
+                if (voter.Kind == VoterKind.Account)
+                {
+                    var uid = voter.Key;
+                    var pid = a.Poll.Id;
+                    var draftNo = responseNo ?? 0;
+                    var one = a.Definition.Responses == ResponsePolicy.One;
+                    await db.ResponseDrafts.Where(d => d.PollId == pid && d.UserId == uid && (one || d.ResponseNo == draftNo)).ExecuteDeleteAsync(ct);
                 }
                 await tx.CommitAsync(ct);
                 // Marked used at once: an exception after the commit must not release an id whose response exists
@@ -467,20 +548,81 @@ public sealed class BallotService(
         return name.Length == 0 ? null : name;
     }
 
-    /// <summary>The voter's answer to the (single) question; pages show <c>Questions[0]</c>. Options removed since the ballot
-    /// was stored are left out (DESIGN.md §26), so the summary, the read-only view and the edit form show only current ones.</summary>
-    private static MyBallot ToMyBallot(PollDefinition def, Ballot row) => ToMyBallot(def.Questions[0], row);
-
-    private static MyBallot ToMyBallot(PollQuestion q, Ballot row)
+    /// <summary>
+    /// The voter's own response: every question's answer with its free text (<paramref name="texts"/>, decrypted; null when
+    /// unreadable), and the first question's ballot in the one-question fields. Options removed since the ballot was stored are
+    /// left out (DESIGN.md §26), so the summary, the read-only view and the edit form show only current ones.
+    /// </summary>
+    private static MyBallot ToMyBallot(PollDefinition def, Ballot row, IReadOnlyDictionary<string, string>? texts)
     {
+        var q = def.Questions[0];
+        var answers = ResponseAnswers.Read(def, row.PayloadJson, texts);
         var ballot = q.Type switch
         {
             PollType.Ranked => new MyBallot(row.ResponseNo, PollJson.ReadRanked(row.PayloadJson, q), null, row.DisplayName, row.SubmittedAt, row.UpdatedAt),
             PollType.Points => new MyBallot(row.ResponseNo, null, PollJson.ReadPoints(row.PayloadJson, q), row.DisplayName, row.SubmittedAt, row.UpdatedAt),
             PollType.Dates => new MyBallot(row.ResponseNo, null, null, row.DisplayName, row.SubmittedAt, row.UpdatedAt) { Dates = PollJson.ReadDates(row.PayloadJson, q) },
-            PollType.Choice or PollType.Text or PollType.Number => throw new NotSupportedException(), // §34 step 2
-            _ => throw new ArgumentOutOfRangeException(nameof(q), q.Type, null),
+            PollType.Choice or PollType.Text or PollType.Number => new MyBallot(row.ResponseNo, null, null, row.DisplayName, row.SubmittedAt, row.UpdatedAt),
+            _ => throw new ArgumentOutOfRangeException(nameof(def), q.Type, null),
         };
-        return ballot with { NotifyOnClose = row.NotifyOnClose };
+        return ballot with { NotifyOnClose = row.NotifyOnClose, Answers = answers };
+    }
+
+    // ---- drafts (DESIGN.md §34.4) ----------------------------------------------------------------
+
+    /// <summary>
+    /// The account's draft for response <paramref name="responseNo"/> (0 = a new one), or null. Only for a voter identified by
+    /// account who may vote now, in a poll with several pages; nobody else has drafts, and nobody else reads them (the key is
+    /// the identity <see cref="PollAccessService"/> resolved for this request).
+    /// </summary>
+    public async Task<ResponseDraftState?> GetDraftAsync(PollAccess a, int responseNo, CancellationToken ct = default)
+    {
+        if (a is not { CanVote: true, Voter.Kind: VoterKind.Account } || VoteLayout.Pages(a.Definition).Count < 2) return null;
+        var uid = a.Voter.Key;
+        var pid = a.Poll.Id;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var row = await db.ResponseDrafts.AsNoTracking().FirstOrDefaultAsync(d => d.PollId == pid && d.UserId == uid && d.ResponseNo == responseNo, ct);
+        if (row is null || textProtection.RevealDraft(pid, uid, responseNo, row.Cipher) is not { } plain) return null;
+        return VoteCarry.Deserialize(a.Definition, plain, time.GetUtcNow(), null) is { } state ? new ResponseDraftState(state, row.UpdatedAt) : null;
+    }
+
+    /// <summary>
+    /// Keeps the carry content as the account's draft (every Next, DESIGN.md §34.4). Access is checked again here, as for a
+    /// ballot: an account that may act, voting by account in an open poll with several pages, and for an existing response
+    /// one of its own. False when nothing was stored.
+    /// </summary>
+    public async Task<bool> SaveDraftAsync(string encodedId, VisitorContext visitor, int responseNo, CarryState state, CancellationToken ct = default)
+    {
+        if (visitor.UserId is not { } uid) return false;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await db.Database.BeginPollWriteAsync(LockId(encodedId), ct);
+        if (!await AccountGate.MayActAsync(db, uid, ct)) return false;
+        var a = await access.GetAsync(db, encodedId, visitor, tracking: false, ct);
+        if (a is not { CanVote: true, Voter.Kind: VoterKind.Account } || a.Voter.Key != uid || VoteLayout.Pages(a.Definition).Count < 2) return false;
+        var pid = a.Poll.Id;
+        var identity = a.Voter.Stored;
+        if (responseNo != 0 && !await db.Ballots.AnyAsync(b => b.PollId == pid && b.VoterIdentity == identity && b.ResponseNo == responseNo, ct)) return false;
+        var plain = VoteCarry.Serialize(a.Definition, state, time.GetUtcNow());
+        if (ResponseTextProtection.Pack(plain).Length > VoteFormLimits.CarryMaxBytes) return false;
+        var cipher = textProtection.ProtectDraft(pid, uid, responseNo, plain);
+        var now = time.GetUtcNow();
+        var row = await db.ResponseDrafts.FirstOrDefaultAsync(d => d.PollId == pid && d.UserId == uid && d.ResponseNo == responseNo, ct);
+        if (row is null) db.ResponseDrafts.Add(new ResponseDraft { PollId = pid, UserId = uid, ResponseNo = responseNo, Cipher = cipher, UpdatedAt = now });
+        else
+        {
+            row.Cipher = cipher;
+            row.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return true;
+    }
+
+    /// <summary>Discard: deletes the account's draft for the response (the identity is the request's, never a form field).</summary>
+    public async Task DiscardDraftAsync(string encodedId, VisitorContext visitor, int responseNo, CancellationToken ct = default)
+    {
+        if (visitor.UserId is not { } uid || !PollId.TryDecode(encodedId, out var pid)) return;
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await db.ResponseDrafts.Where(d => d.PollId == pid && d.UserId == uid && d.ResponseNo == responseNo).ExecuteDeleteAsync(ct);
     }
 }

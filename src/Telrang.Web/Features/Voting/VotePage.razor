@@ -15,6 +15,7 @@
 @inject UserManager<ApplicationUser> Users
 @inject SettingsService Settings
 @inject NavigationManager Nav
+@inject VoteCarry Carry
 
 @if (access is { } a)
 {
@@ -22,6 +23,8 @@
 
     var d = a.Definition;
     var q = d.Questions[0];
+    var page = pages.Count >= pageNo ? pages[pageNo - 1] : pages[0];
+    var last = pageNo >= pages.Count;
     <h1 class="text-break mb-1">@d.Title</h1>
     <PollRules Definition="d" IsClosed="a.IsClosed" ClosesAt="a.Poll.ClosesAt" AutoClose="a.Poll.AutoClose" ZoneId="@zone" />
     @if (a.IsOwner)
@@ -47,7 +50,7 @@
         {
             <form method="post" action="@FormAction" @formname="@DeleteForm" @onsubmit="DeleteAsync" class="vote-summary">
                 <AntiforgeryToken />
-                <VoteSummary Access="a" Responses="responses" JustSubmitted="justSaved" ZoneId="@zone" Heading="@VoteSummary.HeadingFor(q.Type)"
+                <VoteSummary Access="a" Responses="responses" JustSubmitted="justSaved" ZoneId="@zone" Heading="@VoteSummary.HeadingFor(d)"
                              Errors="summaryErrors" Confirming="confirming" />
             </form>
             @if (isPost)
@@ -56,11 +59,32 @@
                 <form method="post" action="@FormAction" @formname="@VoteForm" @onsubmit="VoteAsync" hidden></form>
             }
         }
+        else if (draft is { } saved && draftNotice)
+        {
+            @* A signed-in voter's unfinished answers (DESIGN.md §34.4): resume on the page they left, or throw them away. *@
+            <form method="post" action="@FormAction" @formname="@VoteForm" @onsubmit="VoteAsync" class="vote-form" data-vote-form>
+                <AntiforgeryToken />
+                @if (editing is int en)
+                {
+                    <input type="hidden" name="@BallotForm.ResponseField" value="@en" />
+                }
+                <div class="alert alert-info d-flex flex-wrap align-items-center gap-2 draft-notice" role="status">
+                    <span class="me-auto">Draft · saved @PollTime.Format(saved.SavedAt, zone)</span>
+                    <a class="btn btn-primary" href="@ContinueHref(a, saved.State.Page)" data-enhance-nav="false">Continue</a>
+                    <button type="submit" class="btn btn-outline-secondary" name="@NavField" value="@NavDiscard" formnovalidate>Discard</button>
+                </div>
+            </form>
+        }
         else
         {
             <form method="post" action="@FormAction" @formname="@VoteForm" @onsubmit="VoteAsync" class="vote-form" data-vote-form>
                 <AntiforgeryToken />
-                @if (q.Type == PollType.Dates)
+                @if (!simple)
+                {
+                    @* Enter in a field moves on (Next) or submits; without this the first submit button would be Back or a layout switch. *@
+                    <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true" name="@NavField" value="@(last ? NavSubmit : NavNext)">@(last ? SubmitLabel : "Next")</button>
+                }
+                else if (q.Type == PollType.Dates)
                 {
                     @* Enter in the name field saves; without this the first submit button would be a layout switch. *@
                     <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true">@SubmitLabel</button>
@@ -70,43 +94,74 @@
                 {
                     <input type="hidden" name="@BallotForm.ResponseField" value="@n" />
                 }
-                @switch (q.Type)
+                @if (carryField is not null)
                 {
-                    case PollType.Ranked:
-                        <RankedVote Question="q" Values="values" />
-                        break;
-                    case PollType.Points:
-                        <PointsVote Question="q" Values="values" />
-                        break;
-                    case PollType.Dates:
-                        <DatesVote Question="q" Values="values" />
-                        break;
-                    case PollType.Choice:
-                    case PollType.Text:
-                    case PollType.Number:
-                        throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
-                    default:
-                        throw new InvalidOperationException($"Unknown poll type {q.Type}.");
+                    <input type="hidden" name="@VoteCarry.Field" value="@carryField" />
+                }
+                @if (multiPage)
+                {
+                    <ol class="vote-pages list-unstyled d-flex flex-wrap gap-2 small mb-3" aria-label="Pages">
+                        @foreach (var pg in pages)
+                        {
+                            <li class="@(pg.Number == pageNo ? "vote-page-step vote-page-current fw-semibold" : "vote-page-step text-secondary")"
+                                aria-current="@(pg.Number == pageNo ? "step" : null)" @key="pg.Number">@pg.Number@(pg.Page is { Title.Length: > 0 } t ? " · " + t.Title : "")</li>
+                        }
+                    </ol>
+                }
+                @if (page.Page is { } pp && !simple)
+                {
+                    @if (pp.Title.Length > 0)
+                    {
+                        <h2 class="h4 text-break mb-1">@pp.Title</h2>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(pp.DescriptionMarkdown))
+                    {
+                        <div class="poll-markdown mb-3">@MarkdownRenderer.Render(pp.DescriptionMarkdown)</div>
+                    }
+                }
+                @foreach (var block in page.Blocks)
+                {
+                    @if (block.Group is { } g)
+                    {
+                        <fieldset class="vote-group mb-4" @key="g.Key">
+                            <legend class="h5 text-break">@g.Title</legend>
+                            @if (!string.IsNullOrWhiteSpace(g.DescriptionMarkdown))
+                            {
+                                <div class="poll-markdown small text-secondary mb-2">@MarkdownRenderer.Render(g.DescriptionMarkdown)</div>
+                            }
+                            @foreach (var bq in block.Questions)
+                            {
+                                <QuestionInput Definition="d" Question="bq" Values="FormOf(bq)" TextMax="textMax" @key="bq.Key" />
+                            }
+                        </fieldset>
+                    }
+                    else
+                    {
+                        @foreach (var bq in block.Questions)
+                        {
+                            <QuestionInput Definition="d" Question="bq" Values="FormOf(bq)" TextMax="textMax" @key="bq.Key" />
+                        }
+                    }
                 }
 
-                @if (d.Names != NamesMode.None)
+                @if (last && d.Names != NamesMode.None)
                 {
                     <div class="mb-3">
                         <label for="voter-name" class="form-label">Your name @(d.Names == NamesMode.Required ? "" : "(optional)")</label>
                         <input id="voter-name" name="@BallotForm.NameField" class="form-control form-control-lg" maxlength="@Ballots.MaxNameLength"
-                               autocomplete="name" required="@(d.Names == NamesMode.Required)" value="@values.Name" />
+                               autocomplete="name" required="@(d.Names == NamesMode.Required)" value="@voterName" />
                     </div>
                 }
-                @if (canNotify)
+                @if (last && canNotify)
                 {
                     <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" id="notify-close" name="@BallotForm.NotifyField" value="1" checked="@values.Notify" />
+                        <input class="form-check-input" type="checkbox" id="notify-close" name="@BallotForm.NotifyField" value="1" checked="@notifyChecked" />
                         <label class="form-check-label" for="notify-close">Email me when this poll closes</label>
                     </div>
                 }
 
                 <FormGuardFields />
-                @if (captchaKey is not null)
+                @if (last && captchaKey is not null)
                 {
                     <CaptchaWidget Provider="Settings.Current.Captcha.Provider" SiteKey="@captchaKey" />
                 }
@@ -123,32 +178,43 @@
                     </div>
                 }
 
-                <div class="vote-submit-bar @BarClass(q.Type)">
-                    @switch (q.Type)
+                <div class="vote-submit-bar @(simple ? BarClass(q.Type) : "")">
+                    @if (simple)
                     {
-                        case PollType.Ranked:
-                            <span class="small submit-summary" data-tally>@RankedVote.Tally(q, values)</span>
-                            break;
-                        case PollType.Points:
-                            @PointsVote.Tally(q, values)
-                            break;
-                        case PollType.Dates:
-                            <span class="dates-tally" aria-live="polite" aria-atomic="true" data-tally>@DatesVote.Tally(q, values)</span>
-                            break;
-                        case PollType.Choice:
-                        case PollType.Text:
-                        case PollType.Number:
-                            throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
-                        default:
-                            throw new InvalidOperationException($"Unknown poll type {q.Type}.");
+                        @switch (q.Type)
+                        {
+                            case PollType.Ranked:
+                                <span class="small submit-summary" data-tally>@RankedVote.Tally(q, FormOf(q))</span>
+                                break;
+                            case PollType.Points:
+                                @PointsVote.Tally(q, FormOf(q))
+                                break;
+                            case PollType.Dates:
+                                <span class="dates-tally" aria-live="polite" aria-atomic="true" data-tally>@DatesVote.Tally(q, FormOf(q))</span>
+                                break;
+                            case PollType.Choice:
+                            case PollType.Text:
+                            case PollType.Number:
+                                break;
+                            default:
+                                throw new InvalidOperationException($"Unknown poll type {q.Type}.");
+                        }
                     }
                     @if (responses.Count > 0)
                     {
                         <a class="btn btn-link" href="p/@a.EncodedId" data-enhance-nav="false">Cancel</a>
                     }
-                    @if (a.CanVote)
+                    @if (multiPage && pageNo > 1)
                     {
-                        <button type="submit" class="btn btn-primary btn-lg" data-submit>@SubmitLabel</button>
+                        <button type="submit" class="btn btn-outline-secondary btn-lg" name="@NavField" value="@NavBack" formnovalidate>Back</button>
+                    }
+                    @if (a.CanVote && !last)
+                    {
+                        <button type="submit" class="btn btn-primary btn-lg" name="@NavField" value="@NavNext" data-submit>Next</button>
+                    }
+                    else if (a.CanVote)
+                    {
+                        <button type="submit" class="btn btn-primary btn-lg" name="@(simple ? null : NavField)" value="@(simple ? null : NavSubmit)" data-submit>@SubmitLabel</button>
                     }
                 </div>
             </form>
@@ -214,7 +280,18 @@
                 }
                 break;
         }
-        <OptionList Options="d.Questions[0].Options" />
+        @if (VoteLayout.IsSimple(d))
+        {
+            <OptionList Options="d.Questions[0].Options" />
+        }
+        else
+        {
+            @foreach (var oq in d.Questions.Where(x => x.Options.Count > 0))
+            {
+                <h2 class="h6 text-break" @key="oq.Key">@BallotService.QuestionLabel(d, oq)</h2>
+                <OptionList Options="oq.Options" />
+            }
+        }
         @if (a.CanSeeResults)
         {
             <p class="mt-3"><a class="btn btn-outline-primary" href="p/@a.EncodedId/results" data-enhance-nav="false">See results</a></p>
@@ -235,12 +312,18 @@
     [SupplyParameterFromQuery(Name = "new")] private string? NewParam { get; set; }
     /// <summary><c>?saved=1</c>: the summary with the "saved" status line (after the post/redirect/get).</summary>
     [SupplyParameterFromQuery(Name = "saved")] private string? SavedParam { get; set; }
+    /// <summary><c>?page=N</c>: page N of a poll with several pages (DESIGN.md §34.4).</summary>
+    [SupplyParameterFromQuery(Name = PageQuery)] private string? PageParam { get; set; }
 
     /// <summary>Marker on the one redirect that proves the vk cookie comes back from the browser.</summary>
     public const string CookieCheckQuery = "ck";
     public const string ResponseQuery = "r";
+    public const string PageQuery = "page";
     public const string VoteForm = "vote", DeleteForm = "delete";
     public const string NoCookieMessage = "Cookies are required to vote. Reload the page.";
+    /// <summary>The page buttons of a poll with several pages (DESIGN.md §34.4): one field, the button's value.</summary>
+    public const string NavField = "_nav", NavBack = "back", NavNext = "next", NavSubmit = "submit", NavDiscard = "discard";
+    public const string CarryTooLargeMessage = "Your answers are too long to carry to the next page. Shorten them.";
 
     private PollAccess? access;
     private VisitorContext visitor = VisitorContext.ForUser(null);
@@ -256,9 +339,23 @@
     /// <summary>The response being edited; null = a new one.</summary>
     private int? editing;
     private int? confirming;
-    private BallotForm values = new();
     private List<string> errors = [], summaryErrors = [];
     private readonly string formId = VoteFormIds.Create();
+
+    // The form (DESIGN.md §34.4): the pages, the one shown, its questions' fields, and what the carry field holds.
+    private IReadOnlyList<VotePageLayout> pages = [];
+    private bool simple = true, multiPage;
+    private int pageNo = 1;
+    private Dictionary<string, BallotForm> forms = new(StringComparer.Ordinal);
+    private string? voterName;
+    private bool notifyChecked;
+    private CarryState state = CarryState.Empty;
+    /// <summary>The posted carry field did not open (expired, another identity, forged): the form starts over.</summary>
+    private bool restart;
+    private string? carryField;
+    private ResponseDraftState? draft;
+    private bool draftNotice;
+    private int textMax = PollLimits.Default.TextAnswerMax;
 
     private string FormAction => "p/" + (access?.EncodedId ?? Id);
     private string SubmitLabel => VoteSummary.SubmitLabel(access!.Definition, editing is int n && responses.Any(r => r.ResponseNo == n));
@@ -267,9 +364,12 @@
         PollType.Ranked => "",
         PollType.Points => "points-bar",
         PollType.Dates => "dates-bar",
-        PollType.Choice or PollType.Text or PollType.Number => throw new NotSupportedException(), // §34 step 2
+        PollType.Choice or PollType.Text or PollType.Number => "",
         _ => throw new ArgumentOutOfRangeException(nameof(t), t, null),
     };
+
+    private BallotForm FormOf(PollQuestion q) =>
+        forms.TryGetValue(q.Key, out var f) ? f : forms[q.Key] = BallotForm.FromAnswer(q, null, BallotForm.PrefixFor(access!.Definition, q));
 
     private static int? PositiveInt(string? s) =>
         int.TryParse(s, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n)
@@ -278,6 +378,11 @@
     private static bool Flag(string? s) => s is not null;
 
     private static string LoginUrl(string encodedId) => "Account/Login?ReturnUrl=" + Uri.EscapeDataString("/p/" + encodedId);
+
+    /// <summary>Continue a draft: its page, for the response it belongs to.</summary>
+    private string ContinueHref(PollAccess a, int page) =>
+        $"p/{a.EncodedId}?{PageQuery}={Math.Clamp(page, 1, pages.Count)}"
+        + (editing is int n ? $"&{ResponseQuery}={n}&edit=1" : a.Definition.Responses == ResponsePolicy.Many ? "&new=1" : "");
 
     protected override async Task OnInitializedAsync()
     {
@@ -310,6 +415,10 @@
         access = await AccessService.GetAsync(Id, visitor, Http.RequestAborted);
         if (access is null) { Nav.NotFound(); return; }
         signedIn = userId is not null;
+        simple = VoteLayout.IsSimple(access.Definition);
+        pages = VoteLayout.Pages(access.Definition);
+        multiPage = pages.Count > 1;
+        textMax = Polls.CurrentLimits.TextAnswerMax;
 
         if (!isPost)
         {
@@ -352,8 +461,8 @@
         }
 
         await LoadStateAsync();
-        var q = access.Definition.Questions[0];
-        var many = access.Definition.Responses == ResponsePolicy.Many;
+        var def = access.Definition;
+        var many = def.Responses == ResponsePolicy.Many;
 
         if (isPost)
         {
@@ -361,12 +470,36 @@
             if (BallotForm.Value(form, "_handler") == DeleteForm)
             {
                 showSummary = true;
-                values = BallotForm.FromBallot(q, null);
+                return;
             }
+            editing = many ? BallotForm.ResponseNo(form) : responses.FirstOrDefault()?.ResponseNo;
+            if (multiPage)
+            {
+                // The carry field opens only for this voter, poll and response (DESIGN.md §34.4); its page is the page the
+                // posted fields belong to. A field that does not open starts the form over (the vote handler says so).
+                var opened = access.Voter is { } voter ? Carry.Open(pollId, voter, editing ?? 0, def, BallotForm.Value(form, VoteCarry.Field)) : null;
+                if (opened is null)
+                {
+                    restart = access.CanVote && access.Voter is not null && BallotForm.Value(form, NavField) != NavDiscard;
+                    state = StartState();
+                }
+                else state = opened with { Page = Math.Clamp(opened.Page, 1, pages.Count) };
+                pageNo = state.Page;
+                voterName = state.Name;
+                notifyChecked = state.Notify;
+            }
+            if (restart) FormsFrom(state.Answers);
             else
             {
-                values = BallotForm.FromForm(q, form, Ballots.MaxNameLength);
-                editing = many ? BallotForm.ResponseNo(form) : responses.FirstOrDefault()?.ResponseNo;
+                foreach (var pq in pages[pageNo - 1].Questions)
+                    forms[pq.Key] = BallotForm.FromForm(pq, form, BallotForm.PrefixFor(def, pq));
+            }
+            if (pageNo == pages.Count && !restart)
+            {
+                var name = BallotForm.Value(form, BallotForm.NameField);
+                // Re-rendered as typed, but never more than the field could hold (BallotService refuses longer names).
+                voterName = name is null ? null : name.Length > Ballots.MaxNameLength * 2 ? name[..(Ballots.MaxNameLength * 2)] : name;
+                notifyChecked = BallotForm.Value(form, BallotForm.NotifyField) is "1" or "on" or "true";
             }
             return; // the named form's handler does the rest
         }
@@ -385,7 +518,54 @@
             showSummary = responses.Count > 0 && !Flag(EditParam) && requested is null;
         }
         justSaved = showSummary && Flag(SavedParam);
-        values = BallotForm.FromBallot(q, editing is int e ? responses.FirstOrDefault(r => r.ResponseNo == e) : null);
+        if (showSummary) return;
+
+        // Editing a submitted response loads it (into the carry field of a form with several pages); a signed-in voter's
+        // draft for the response resumes on the page they left (DESIGN.md §34.4).
+        state = StartState();
+        voterName = state.Name;
+        notifyChecked = state.Notify;
+        if (multiPage)
+        {
+            draft = await Ballots.GetDraftAsync(access, editing ?? 0, Http.RequestAborted);
+            var askedPage = PositiveInt(PageParam);
+            if (draft is { } saved)
+            {
+                draftNotice = askedPage is null;
+                state = saved.State;
+                voterName = state.Name ?? voterName;
+                notifyChecked = state.Notify;
+            }
+            pageNo = Math.Clamp(askedPage ?? state.Page, 1, pages.Count);
+            state = state with { Page = pageNo };
+            IssueCarry();
+        }
+        FormsFrom(state.Answers);
+    }
+
+    /// <summary>The answers a form starts with: the response being edited, or none.</summary>
+    private CarryState StartState()
+    {
+        var start = editing is int e ? responses.FirstOrDefault(r => r.ResponseNo == e) : null;
+        return new CarryState(1, start?.Answers ?? new Dictionary<string, QuestionAnswer>(StringComparer.Ordinal), start?.DisplayName,
+            start?.NotifyOnClose ?? false);
+    }
+
+    /// <summary>The shown page's fields from answers (the carry's, a draft's or a stored response's).</summary>
+    private void FormsFrom(IReadOnlyDictionary<string, QuestionAnswer> answers)
+    {
+        var def = access!.Definition;
+        forms = new Dictionary<string, BallotForm>(StringComparer.Ordinal);
+        foreach (var pq in pages[pageNo - 1].Questions)
+            forms[pq.Key] = BallotForm.FromAnswer(pq, answers.GetValueOrDefault(pq.Key), BallotForm.PrefixFor(def, pq));
+    }
+
+    /// <summary>A new carry field for <see cref="state"/> (forms with several pages only).</summary>
+    private bool IssueCarry()
+    {
+        if (!multiPage || access?.Voter is not { } voter) return false;
+        carryField = Carry.Issue(access.Poll.Id, voter, editing ?? 0, access.Definition, state with { Page = pageNo, Name = voterName, Notify = notifyChecked });
+        return carryField is not null;
     }
 
     private async Task LoadStateAsync()
@@ -397,39 +577,138 @@
         captchaKey = access!.CanVote && CaptchaProviders.Required(captcha, access.Poll, visitor.UserId) ? captcha.SiteKey : null;
     }
 
-    /// <summary>The "vote" form: save, or (no JS) switch the dates layout.</summary>
+    /// <summary>The posted fields of the shown page as answers; format errors (no number where one belongs) in <paramref name="parseErrors"/>.</summary>
+    private Dictionary<string, QuestionAnswer> PostedAnswers(List<string> parseErrors)
+    {
+        var def = access!.Definition;
+        var posted = new Dictionary<string, QuestionAnswer>(StringComparer.Ordinal);
+        foreach (var pq in pages[pageNo - 1].Questions)
+        {
+            var errs = new List<string>();
+            if (FormOf(pq).ToAnswer(pq, errs) is { } answer) posted[pq.Key] = answer;
+            foreach (var e in errs) parseErrors.Add(simple ? e : $"{BallotService.QuestionLabel(def, pq)}: {e}");
+        }
+        return posted;
+    }
+
+    /// <summary>
+    /// The "vote" form: save; in a form with several pages Back and Next (DESIGN.md §34.4); a draft's Discard; or (no JS)
+    /// switch a dates layout.
+    /// </summary>
     private async Task VoteAsync()
     {
         if (access is null) return;
         var form = await Http.Request.ReadFormAsync(Http.RequestAborted);
-        if (BallotForm.IsViewSwitch(form)) return; // re-render with the posted answers in the chosen layout
+        var nav = BallotForm.Value(form, NavField);
+        if (nav == NavDiscard)
+        {
+            // The identity is the request's: only this account's own draft is deleted.
+            await Ballots.DiscardDraftAsync(Id, visitor, editing ?? 0, Http.RequestAborted);
+            Nav.NavigateTo($"p/{access.EncodedId}" + (editing is int en ? $"?{ResponseQuery}={en}&edit=1" : ""));
+            return;
+        }
+        if (multiPage && (!access.CanVote || access.Voter is null))
+        {
+            errors = [Reason(access)];
+            return;
+        }
+        if (restart)
+        {
+            errors = [VoteCarry.RestartMessage];
+            IssueCarry();
+            return;
+        }
+        if (BallotForm.IsViewSwitch(form))
+        {
+            IssueCarry(); // re-render with the posted answers in the chosen layout
+            return;
+        }
 
         var def = access.Definition;
-        var q = def.Questions[0];
+        var limits = Polls.CurrentLimits;
         var parseErrors = new List<string>();
+        var posted = PostedAnswers(parseErrors);
+        if (multiPage)
+        {
+            var merged = new Dictionary<string, QuestionAnswer>(state.Answers, StringComparer.Ordinal);
+            var pageQuestions = pages[pageNo - 1].Questions;
+            if (nav == NavBack)
+            {
+                // Back keeps what is valid on this page, required or not, and goes back without a word.
+                foreach (var pq in pageQuestions)
+                {
+                    if (!posted.TryGetValue(pq.Key, out var answer) || ResponseAnswers.Validate(pq, answer, limits, requireAnswer: false).Count > 0) continue;
+                    if (ResponseAnswers.Normalize(pq, answer) is { } kept) merged[pq.Key] = kept;
+                    else merged.Remove(pq.Key);
+                }
+                MoveTo(Math.Max(1, pageNo - 1), merged);
+                return;
+            }
+            errors = [.. parseErrors, .. BallotService.ValidatePage(def, pageQuestions, posted, limits, requireAnswers: true)];
+            foreach (var pq in pageQuestions)
+            {
+                if (ResponseAnswers.Normalize(pq, posted.GetValueOrDefault(pq.Key)) is { } kept) merged[pq.Key] = kept;
+                else merged.Remove(pq.Key);
+            }
+            if (errors.Count == 0)
+                errors = Telrang.Core.Ballots.ResponseText.Validate(def.Questions, ResponseAnswers.Texts(def, merged), limits).ToList();
+            if (errors.Count > 0)
+            {
+                IssueCarry(); // the same content: this page's fields stay as typed
+                return;
+            }
+            if (pageNo < pages.Count)
+            {
+                MoveTo(pageNo + 1, merged);
+                if (carryField is not null && access.Voter is { Kind: VoterKind.Account })
+                    await Ballots.SaveDraftAsync(Id, visitor, editing ?? 0, state, Http.RequestAborted);
+                return;
+            }
+            // Submit: every page is checked again; the first with a problem is shown with it.
+            foreach (var pg in pages)
+            {
+                var pageErrors = BallotService.ValidatePage(def, pg.Questions, merged, limits, requireAnswers: true);
+                if (pageErrors.Count == 0) continue;
+                MoveTo(pg.Number, merged);
+                errors = pageErrors;
+                return;
+            }
+            posted = merged;
+        }
+        else if (parseErrors.Count > 0)
+        {
+            errors = parseErrors;
+            return;
+        }
+
         var guard = new BallotGuard(BallotForm.Value(form, FormGuard.HoneypotField), BallotForm.CaptchaToken(form),
             BallotForm.Value(form, FormGuard.StampField), BallotForm.Value(form, BallotForm.FormIdField));
         var responseNo = def.Responses == ResponsePolicy.Many ? editing : null;
-        var notify = values.Notify && canNotify;
-        SubmitResult? result = q.Type switch
-        {
-            PollType.Ranked => values.ToRanked(q, parseErrors) is { } ranked
-                ? await Ballots.SubmitRankedAsync(Id, visitor, ranked, values.Name, responseNo, guard, notify, Http.RequestAborted) : null,
-            PollType.Points => values.ToPoints(q, parseErrors) is { } points
-                ? await Ballots.SubmitPointsAsync(Id, visitor, points, values.Name, responseNo, guard, notify, Http.RequestAborted) : null,
-            PollType.Dates => await Ballots.SubmitDatesAsync(Id, visitor, values.ToDates(), values.Name, responseNo, guard, notify, Http.RequestAborted),
-            PollType.Choice or PollType.Text or PollType.Number => throw new NotSupportedException(), // §34 step 2
-            _ => throw new InvalidOperationException($"Unknown poll type {q.Type}."),
-        };
+        var notify = notifyChecked && canNotify;
+        var result = await Ballots.SubmitResponseAsync(Id, visitor, posted, voterName, responseNo, guard, notify, Http.RequestAborted);
         if (result is { Succeeded: true })
         {
             Nav.NavigateTo($"p/{access.EncodedId}?saved=1");
             return;
         }
-        errors = result is null ? parseErrors : Refusal(result);
+        errors = Refusal(result);
         await AfterRefusalAsync(result);
         // A response that is gone is not edited any more: sending again adds the values as a new one.
         if (editing is int n && responses.All(r => r.ResponseNo != n)) editing = null;
+        if (multiPage)
+        {
+            state = state with { Answers = posted };
+            if (!IssueCarry()) carryField = null;
+        }
+    }
+
+    /// <summary>Shows page <paramref name="number"/> with <paramref name="answers"/> and a new carry field.</summary>
+    private void MoveTo(int number, Dictionary<string, QuestionAnswer> answers)
+    {
+        pageNo = number;
+        state = new CarryState(number, answers, voterName, notifyChecked);
+        FormsFrom(answers);
+        if (!IssueCarry()) errors = [CarryTooLargeMessage];
     }
 
     /// <summary>The "delete" form: Delete… asks (second render), Delete in that render deletes.</summary>

@@ -20,7 +20,9 @@ export function init(root) {
   const zone = name => board.querySelector(`[data-zone="${name}"]`);
   const ranked = zone('ranked'), pool = zone('pool'), banned = zone('banned');
   const items = list => list ? [...list.querySelectorAll(':scope > [data-key]')] : [];
-  const field = (prefix, key) => fields.querySelector(`[data-field="${prefix}${CSS.escape(key)}"]`);
+  // In a poll with several questions every field name starts with the question's prefix (data-prefix, DESIGN.md §34.4).
+  const pre = CSS.escape(root.dataset.prefix ?? '');
+  const field = (prefix, key) => fields.querySelector(`[data-field="${pre}${prefix}${CSS.escape(key)}"]`);
   const label = item => item.dataset.label;
 
   const announce = message => {

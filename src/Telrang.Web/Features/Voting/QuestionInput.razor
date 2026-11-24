@@ -1,0 +1,97 @@
+@* The one vote path (DESIGN.md §34.5): every question of the static vote form is rendered here, by type. A simple poll's
+   ranked, points or dates question is exactly the form from before §34 (no wrapper; the tally sits in the submit bar).
+   Every other question is a fieldset with its prompt, "Required", help and rules; in a poll with several questions it is
+   also the scope ([data-ballot]) the vote modules find their tally in. *@
+@if (Simple && Question.Type is PollType.Ranked or PollType.Points or PollType.Dates)
+{
+    @Input
+}
+else
+{
+    var rules = PollText.RulesLine(Question);
+    <fieldset class="vote-question mb-4" data-ballot="@(Simple ? null : "")" id="@Values.Id("question")">
+        @if (Question.Prompt.Length > 0 || !Simple)
+        {
+            <legend class="h5 mb-1 text-break">@Label
+                @if (Question.Required)
+                {
+                    <span class="small text-secondary fw-normal ms-1">Required</span>
+                }
+            </legend>
+        }
+        else
+        {
+            <legend class="visually-hidden">@Label</legend>
+        }
+        @if (!string.IsNullOrWhiteSpace(Question.HelpMarkdown))
+        {
+            <div class="poll-markdown small text-secondary mb-2">@MarkdownRenderer.Render(Question.HelpMarkdown)</div>
+        }
+        @if (!Simple && rules.Length > 0)
+        {
+            <p class="small text-secondary mb-2">@rules</p>
+        }
+        @Input
+        @if (!Simple)
+        {
+            @switch (Question.Type)
+            {
+                case PollType.Ranked:
+                    <p class="small submit-summary mt-1 mb-0" data-tally>@RankedVote.Tally(Question, Values)</p>
+                    break;
+                case PollType.Points:
+                    <p class="mt-1 mb-0">@PointsVote.Tally(Question, Values)</p>
+                    break;
+                case PollType.Dates:
+                    <p class="dates-tally mt-1 mb-0" aria-live="polite" aria-atomic="true" data-tally>@DatesVote.Tally(Question, Values)</p>
+                    break;
+                case PollType.Choice:
+                case PollType.Text:
+                case PollType.Number:
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown question type {Question.Type}.");
+            }
+        }
+    </fieldset>
+}
+
+@code {
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public BallotForm Values { get; set; } = default!;
+    /// <summary>The admin's limit for one text answer.</summary>
+    [Parameter] public int TextMax { get; set; } = PollLimits.Default.TextAnswerMax;
+
+    private bool Simple => VoteLayout.IsSimple(Definition);
+
+    /// <summary>The prompt; in a simple poll without one the poll title is the question.</summary>
+    private string Label => Question.Prompt.Length > 0 ? Question.Prompt : Simple ? Definition.Title : BallotService.QuestionLabel(Definition, Question);
+
+    private RenderFragment Input => __builder =>
+    {
+        switch (Question.Type)
+        {
+            case PollType.Ranked:
+                <RankedVote Question="Question" Values="Values" />
+                break;
+            case PollType.Points:
+                <PointsVote Question="Question" Values="Values" />
+                break;
+            case PollType.Dates:
+                <DatesVote Question="Question" Values="Values" />
+                break;
+            case PollType.Choice:
+                <ChoiceVote Question="Question" Values="Values" Label="@Label" TextMax="TextMax" />
+                break;
+            case PollType.Text:
+                <TextVote Question="Question" Values="Values" Label="@Label" TextMax="TextMax" />
+                break;
+            case PollType.Number:
+                <NumberVote Question="Question" Values="Values" Label="@Label" />
+                break;
+            default:
+                throw new InvalidOperationException($"Unknown question type {Question.Type}.");
+        }
+    };
+}
