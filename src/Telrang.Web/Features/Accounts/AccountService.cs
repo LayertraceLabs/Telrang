@@ -37,7 +37,8 @@ public sealed class AccountService(
     TimeProvider time,
     ILogger<AccountService> logger,
     Results.PollChangeNotifier notifier,
-    EmailProtection emails)
+    EmailProtection emails,
+    ResponseTextProtection textProtection)
 {
     public static readonly TimeSpan SetupLinkLifetime = TimeSpan.FromDays(7);
     public static readonly TimeSpan AdminResetLifetime = TimeSpan.FromHours(24);
@@ -579,7 +580,7 @@ public sealed class AccountService(
             .Select(p => new { p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt, p.DefinitionJson, Ballots = p.Ballots.Count })
             .ToListAsync(ct);
         var ballotRows = await db.Ballots.AsNoTracking().Where(b => b.UserId == user.Id)
-            .Select(b => new { b.Poll!.Title, b.Poll.Type, b.ResponseNo, b.DisplayName, b.SubmittedAt, b.UpdatedAt, b.PayloadJson })
+            .Select(b => new { b.PollId, b.Poll!.Title, b.Poll.Type, b.ResponseNo, b.DisplayName, b.SubmittedAt, b.UpdatedAt, b.PayloadJson, b.TextCipher })
             .ToListAsync(ct);
         var ballots = ballotRows.OrderBy(b => b.SubmittedAt).Select(b => new
         {
@@ -590,6 +591,20 @@ public sealed class AccountService(
             b.SubmittedAt,
             b.UpdatedAt,
             ballot = JsonSerializer.Deserialize<JsonElement>(b.PayloadJson),
+            // The account's own free text (DESIGN.md §34.3), decrypted: {"q5": "…", "q2.other": "…"}; null when none or unreadable.
+            texts = b.TextCipher is null ? null : textProtection.RevealTexts(b.PollId, b.TextCipher),
+        }).ToList();
+        // The account's own unfinished responses (DESIGN.md §34.4), decrypted. Only its own: nobody else's drafts, and no
+        // count of drafts on the polls it owns (an owner cannot see that a draft exists).
+        var draftRows = await db.ResponseDrafts.AsNoTracking().Where(d => d.UserId == user.Id)
+            .Join(db.Polls, d => d.PollId, p => p.Id, (d, p) => new { d.PollId, p.Title, d.ResponseNo, d.UpdatedAt, d.Cipher })
+            .ToListAsync(ct);
+        var drafts = draftRows.OrderBy(d => d.UpdatedAt).Select(d => new
+        {
+            poll = d.Title,
+            response = d.ResponseNo,
+            d.UpdatedAt,
+            answers = DraftContent(textProtection.RevealDraft(d.PollId, user.Id, d.ResponseNo, d.Cipher)),
         }).ToList();
         var export = new
         {
@@ -610,8 +625,29 @@ public sealed class AccountService(
             // Ballots recorded with this account (accounts/public mode, and invite links used while signed
             // in). Anonymous ballots are keyed by a browser cookie and cannot be attributed.
             ballots,
+            drafts,
         };
         return JsonSerializer.SerializeToUtf8Bytes(export, ExportJson);
+    }
+
+    /// <summary>A draft's answers as stored (scored parts <c>p</c>, free text <c>t</c>, name <c>n</c>); null when unreadable.</summary>
+    private static JsonElement? DraftContent(byte[]? plain)
+    {
+        if (plain is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(plain);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            var o = new System.Text.Json.Nodes.JsonObject();
+            foreach (var (from, to) in new[] { ("p", "ballot"), ("t", "texts"), ("n", "name") })
+                if (root.TryGetProperty(from, out var v)) o[to] = System.Text.Json.Nodes.JsonNode.Parse(v.GetRawText());
+            return JsonSerializer.SerializeToElement(o);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string Errors(IdentityResult r) => string.Join(" ", r.Errors.Select(e => e.Description));
