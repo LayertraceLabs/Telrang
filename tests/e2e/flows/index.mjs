@@ -5,6 +5,7 @@ import * as editor from './editor.mjs';
 import * as datesEditor from './dates-editor.mjs';
 import * as share from './share.mjs';
 import * as vote from './vote.mjs';
+import * as votePages from './vote-pages.mjs';
 import * as results from './results.mjs';
 import * as edit from './edit.mjs';
 import * as theme from './theme.mjs';
@@ -13,4 +14,4 @@ import * as admin from './admin.mjs';
 import * as mail from './mail.mjs';
 
 // `when`: a flow that runs only in some setups (mail needs an SMTP server, scripts/npm-stack-test.sh).
-export const flows = [setup, home, editor, datesEditor, share, vote, results, edit, theme, signin, admin, mail];
+export const flows = [setup, home, editor, datesEditor, share, vote, votePages, results, edit, theme, signin, admin, mail];
