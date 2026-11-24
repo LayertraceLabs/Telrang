@@ -19,6 +19,8 @@ public static class BallotFilter
     public static PointsBallot Known(PollQuestion q, PointsBallot ballot) => For(q).Filter(ballot);
 
     public static DatesBallot Known(PollQuestion q, DatesBallot ballot) => For(q).Filter(ballot);
+
+    public static ChoiceBallot Known(PollQuestion q, ChoiceBallot ballot) => For(q).Filter(ballot);
 }
 
 /// <summary>A question's current option keys (<see cref="BallotFilter.For"/>); the filters drop every other key.</summary>
@@ -39,6 +41,9 @@ public sealed class KnownKeys
 
     public PointsBallot Filter(PointsBallot ballot) =>
         new(ballot.Points.Where(p => keys.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal));
+
+    /// <summary>Choice: the picked keys the question still has, each once; the Other flag stays (it is not an option key).</summary>
+    public ChoiceBallot Filter(ChoiceBallot ballot) => new(ballot.Keys.Where(keys.Contains).Distinct().ToList(), ballot.Other);
 
     public DatesBallot Filter(DatesBallot ballot) =>
         new(ballot.Answers.Where(a => keys.Contains(a.Key)).ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal));
