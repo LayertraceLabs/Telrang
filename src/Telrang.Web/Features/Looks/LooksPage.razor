@@ -1,0 +1,243 @@
+@page "/looks"
+@layout MainLayout
+@attribute [Authorize]
+@inject IOptions<AppOptions> AppOptions
+@inject LookService Looks
+@inject ThemeService Theme
+@inject UserManager<ApplicationUser> Users
+@* Saved looks (DESIGN.md §34.7): list, new, edit with a preview, rename, delete, "Use as default" for new polls, and import
+   from a poll link or a look code / export as a look code. Polls hold copies: nothing here changes a poll. *@
+
+<PageTitle>Looks - @AppOptions.Value.Name</PageTitle>
+
+<PageHeader Title="Looks">
+    <Actions>
+        @if (editing is null)
+        {
+            <button type="button" class="btn btn-primary" disabled="@(busy || list is null || list.Looks.Count >= UserLimits.SavedLooksPerUser)" @onclick="StartNew">New look</button>
+        }
+    </Actions>
+</PageHeader>
+
+@if (status is not null)
+{
+    <div class="alert @(statusOk ? "alert-info" : "alert-danger")" role="status">@status</div>
+}
+
+@if (editing is not null)
+{
+    <section class="card card-body mb-4 look-editor" aria-labelledby="look-editor-title">
+        <h2 class="h5" id="look-editor-title">@(editingId is null ? "New look" : "Edit look")</h2>
+        <div class="mb-3 option-field look-name">
+            <label for="look-name" class="form-label">Name</label>
+            <OptionHelp Label="Name">
+                <p>At most @SavedLook.MaxNameLength characters. Shown in the poll editor's Look list.</p>
+            </OptionHelp>
+            <input id="look-name" class="form-control" maxlength="@SavedLook.MaxNameLength" @bind="editName" />
+        </div>
+        <LookFields Form="editing" Prefix="look" Changed="EditChanged" />
+        @if (editLook is not null)
+        {
+            <div class="mt-3"><LookPreview Look="editLook" /></div>
+        }
+        <div class="d-flex flex-wrap gap-2 mt-3">
+            <button type="button" class="btn btn-primary" disabled="@busy" @onclick="SaveAsync">Save look</button>
+            <button type="button" class="btn btn-outline-secondary" disabled="@busy" @onclick="CancelEdit">Cancel</button>
+        </div>
+    </section>
+}
+
+@if (list is null)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else
+{
+    <p class="small text-secondary mb-2">
+        Default for new polls · @(list.Looks.FirstOrDefault(l => l.Id == list.DefaultId)?.Name ?? "Instance theme")
+        @if (list.DefaultId is not null)
+        {
+            <button type="button" class="btn btn-link btn-sm p-0 ms-2 align-baseline" disabled="@busy" @onclick="() => DefaultAsync(null)">Use instance theme</button>
+        }
+        · @list.Looks.Count / @UserLimits.SavedLooksPerUser
+    </p>
+    @if (list.Looks.Count == 0)
+    {
+        <EmptyState Text="No looks yet."><button type="button" class="btn btn-primary" disabled="@busy" @onclick="StartNew">New look</button></EmptyState>
+    }
+    else
+    {
+        <div class="list-group mb-4 look-list">
+            @foreach (var l in list.Looks)
+            {
+                var lookCode = l.Look.ToCode();
+                var statusId = $"look-code-{l.Id:N}";
+                var confirmId = $"confirm-look-{l.Id:N}";
+                <div class="list-group-item py-3" @key="l.Id" data-look="@l.Name">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <svg class="look-swatches" viewBox="0 0 44 10" role="img" aria-label="@($"Colours {l.Look.LightBase} {l.Look.LightHighlight} {l.Look.DarkBase} {l.Look.DarkHighlight}")">
+                            <rect x="0" y="0" width="10" height="10" fill="@l.Look.LightBase" />
+                            <rect x="11" y="0" width="10" height="10" fill="@l.Look.LightHighlight" />
+                            <rect x="23" y="0" width="10" height="10" fill="@l.Look.DarkBase" />
+                            <rect x="34" y="0" width="10" height="10" fill="@l.Look.DarkHighlight" />
+                        </svg>
+                        <span class="fw-semibold text-break look-list-name">@l.Name</span>
+                        @if (l.Id == list.DefaultId)
+                        {
+                            <span class="badge badge-open">Default</span>
+                        }
+                        <span class="small text-secondary ms-auto">@l.Look.FontLabel · @l.Look.RadiusText</span>
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="() => StartEdit(l)">Edit</button>
+                        @if (l.Id != list.DefaultId)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@busy" @onclick="() => DefaultAsync(l.Id)">Use as default</button>
+                        }
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-copy="@lookCode" data-copy-status="@statusId">Copy code</button>
+                        <span class="small" id="@statusId" role="status"></span>
+                        @if (confirmDelete != l.Id)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-danger ms-auto" disabled="@busy" @onclick="() => AskDelete(l.Id)">Delete…</button>
+                        }
+                    </div>
+                    @if (confirmDelete == l.Id)
+                    {
+                        <div class="confirm-panel mt-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="@confirmId" @bind="confirmChecked" />
+                                <label class="form-check-label" for="@confirmId">Delete “@l.Name”. Polls keep their copy.</label>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2 mt-2">
+                                <button type="button" class="btn btn-sm btn-danger" disabled="@(!confirmChecked || busy)" @onclick="() => DeleteAsync(l.Id)">Delete look</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AskDelete(null)">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    <section aria-labelledby="look-import-title">
+        <h2 class="h5" id="look-import-title">Import</h2>
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-6 option-field">
+                <label for="look-import" class="form-label">Poll link or look code</label>
+                <OptionHelp Label="Poll link or look code">
+                    <p>A link to a poll you can open (its look is copied) or a code from <em>Copy code</em>, which starts with
+                        @ThemeLook.CodePrefix and is at most @ThemeLook.MaxCodeBytes bytes. A look holds only colours, a font from
+                        the list and a corner radius; it is checked as if entered here.</p>
+                </OptionHelp>
+                <input id="look-import" class="form-control font-monospace" autocomplete="off" spellcheck="false" maxlength="@LookService.MaxImportLength" @bind="importText" />
+            </div>
+            <div class="col-12 col-sm-8 col-md-4 option-field">
+                <label for="look-import-name" class="form-label">Name</label>
+                <OptionHelp Label="Import name">
+                    <p>Empty: the poll's title, or "@LookService.ImportedName" for a code.</p>
+                </OptionHelp>
+                <input id="look-import-name" class="form-control" maxlength="@SavedLook.MaxNameLength" @bind="importName" />
+            </div>
+            <div class="col-12 col-sm-4 col-md-2">
+                <button type="button" class="btn btn-outline-primary w-100" disabled="@busy" @onclick="ImportAsync">Import</button>
+            </div>
+        </div>
+    </section>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private SavedLookList? list;
+    private string? status;
+    private bool statusOk, busy, confirmChecked;
+    private Guid? confirmDelete;
+
+    // The open form: null = none; editingId null = a new look.
+    private LookForm? editing;
+    private ThemeLook? editLook;
+    private Guid? editingId;
+    private string? editName;
+
+    private string? importText, importName;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task<string?> UserIdAsync() => Users.GetUserId((await AuthState).User);
+
+    private async Task LoadAsync()
+    {
+        if (await UserIdAsync() is not { } userId) return;
+        var loaded = await Looks.ListAsync(userId);
+        list = loaded;
+    }
+
+    private void Say(bool ok, string? message) => (statusOk, status) = (ok, message);
+
+    private void StartNew()
+    {
+        status = null;
+        var start = Theme.Settings.Look; // a new look starts from the site's theme
+        (editingId, editName, editLook) = (null, null, start);
+        editing = LookForm.From(start);
+    }
+
+    private void StartEdit(SavedLookItem l)
+    {
+        status = null;
+        (editingId, editName, editLook) = (l.Id, l.Name, l.Look);
+        editing = LookForm.From(l.Look);
+    }
+
+    private void CancelEdit() => (editing, editingId, editLook) = (null, null, null);
+
+    private void EditChanged()
+    {
+        if (editing?.ToLook().Look is { } look) editLook = look;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (editing is null) return;
+        var (look, error) = editing.ToLook();
+        if (look is null) { Say(false, error); return; }
+        await RunAsync(async userId => editingId is { } id
+            ? await Looks.UpdateAsync(userId, id, editName, look)
+            : await Looks.CreateAsync(userId, editName, look), "Look saved.");
+        if (statusOk) CancelEdit();
+    }
+
+    private Task DefaultAsync(Guid? id) =>
+        RunAsync(userId => Looks.SetDefaultAsync(userId, id), id is null ? "New polls start with the instance theme." : "New polls start with this look.");
+
+    private void AskDelete(Guid? id) => (confirmDelete, confirmChecked) = (id, false);
+
+    private async Task DeleteAsync(Guid id)
+    {
+        await RunAsync(userId => Looks.DeleteAsync(userId, id), "Look deleted.");
+        confirmDelete = null;
+        if (editingId == id) CancelEdit();
+    }
+
+    private async Task ImportAsync()
+    {
+        await RunAsync(userId => Looks.ImportAsync(userId, importText, importName), "Look imported.");
+        if (statusOk) (importText, importName) = (null, null);
+    }
+
+    private async Task RunAsync(Func<string, Task<LookOutcome>> action, string done)
+    {
+        if (await UserIdAsync() is not { } userId) return;
+        busy = true;
+        try
+        {
+            var result = await action(userId);
+            Say(result.Ok, result.Ok ? done : result.Error);
+            await LoadAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

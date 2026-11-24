@@ -96,6 +96,41 @@ public partial class EditorHelpTests
         Assert.Contains("<OptionHelp Label=\"Aliases\">", share);
     }
 
+    /// <summary>
+    /// The look controls (DESIGN.md §34.6, §34.7): the editor's Look tab and section (<c>PollLookEditor</c>) and the controls it
+    /// shares with the admin's theme section (<c>LookFields</c>): every label has an option help, or names the shared one.
+    /// </summary>
+    [Fact]
+    public void Every_look_control_has_an_option_help()
+    {
+        var problems = new List<string>();
+        foreach (var (file, covered) in new[]
+                 {
+                     (WebFile("Features", "Looks", "PollLookEditor.razor"), new[] { "Look", "Look name" }),
+                     (WebFile("Features", "Branding", "LookFields.razor"), new[] { "Font", "Corner radius", "Colours" }),
+                 })
+        {
+            var labels = AnyLabel().Matches(file).Select(m => m.Index).ToList();
+            Assert.NotEmpty(labels);
+            foreach (var at in labels)
+            {
+                var next = labels.FirstOrDefault(i => i > at, file.Length);
+                var between = file[at..next];
+                var tag = between[..(between.IndexOf('>') + 1)];
+                if (!between.Contains("<OptionHelp", StringComparison.Ordinal) && !tag.Contains("data-help=", StringComparison.Ordinal))
+                    problems.Add($"{tag} has no OptionHelp");
+            }
+            foreach (var label in covered)
+            {
+                if (!Regex.IsMatch(file, "<OptionHelp\\b[^>]*\\bLabel=\"" + Regex.Escape(label) + "\"")) problems.Add($"{label}: no OptionHelp");
+            }
+        }
+        // The admin's theme section uses the same controls (no second set of look controls).
+        Assert.Contains("<LookFields Form=\"look\" Instance=\"true\"", WebFile("Features", "Admin", "AdminSettings.razor"));
+        Assert.DoesNotContain("type=\"color\"", WebFile("Features", "Admin", "AdminSettings.razor"));
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
     /// <summary>The numbers in the new types' help (DESIGN.md §23.4: examples are pinned by a test) hold for the validators.</summary>
     [Fact]
     public void The_help_examples_of_the_new_types_hold()

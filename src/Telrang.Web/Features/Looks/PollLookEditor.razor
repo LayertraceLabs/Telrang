@@ -1,0 +1,142 @@
+@inject LookService Looks
+@inject ThemeService Theme
+@* The poll editor's look (DESIGN.md §34.6, §34.7): the Look tab of the structured editor and the Look section of the simple
+   one. Pick the instance theme or a saved look, adjust it with the shared look controls (LookFields) beside a preview, keep it
+   as a saved look. The poll stores a copy; nothing here changes a saved look but "Save as look", which adds one. *@
+
+<div class="option-field mb-3">
+    <label for="@Prefix-pick" class="form-label">Look</label>
+    <OptionHelp Label="Look">
+        <p>The colours, font and corner radius of the poll's vote and results pages, in light and dark mode. Instance theme: the
+            site's own. Choosing a saved look copies it into the poll: changing or deleting the saved look later leaves the poll
+            as it is.</p>
+        <p>Not one of the fixed settings and not in the change log: a saved change shows on the poll's next page load, also
+            after voting started.</p>
+    </OptionHelp>
+    <select id="@Prefix-pick" class="form-select" value="@Picked" @onchange="PickAsync">
+        <option value="@InstanceValue">Instance theme</option>
+        @foreach (var s in saved.Looks)
+        {
+            <option value="@s.Id" @key="s.Id">@s.Name</option>
+        }
+        <option value="@CustomValue">Custom</option>
+    </select>
+</div>
+
+@if (Value is { } look)
+{
+    <LookFields Form="form" Prefix="@Prefix" Changed="FieldsChangedAsync" />
+    <div class="mt-3">
+        <LookPreview Look="look" />
+    </div>
+    <div class="row g-2 align-items-end mt-2">
+        <div class="col-12 col-sm-6 option-field">
+            <label for="@Prefix-name" class="form-label">Look name</label>
+            <OptionHelp Label="Look name">
+                <p>Saves these colours, font and radius as a new look on your Looks page, at most @SavedLook.MaxNameLength characters;
+                    up to @UserLimits.SavedLooksPerUser looks per account. The poll keeps its own copy.</p>
+            </OptionHelp>
+            <input id="@Prefix-name" class="form-control" maxlength="@SavedLook.MaxNameLength" @bind="name" />
+        </div>
+        <div class="col-12 col-sm-6 d-flex flex-wrap align-items-center gap-2">
+            <button type="button" class="btn btn-outline-secondary" disabled="@busy" @onclick="SaveAsLookAsync">Save as look</button>
+            <a href="looks" class="small">Looks</a>
+        </div>
+    </div>
+    @if (message is not null)
+    {
+        <p class="small mt-2 mb-0 @(ok ? "text-success" : "text-danger")" role="status">@message</p>
+    }
+}
+
+@code {
+    private const string InstanceValue = "", CustomValue = "custom";
+
+    /// <summary>The poll's look; null = the instance theme.</summary>
+    [Parameter] public ThemeLook? Value { get; set; }
+    [Parameter] public EventCallback<ThemeLook?> ValueChanged { get; set; }
+
+    /// <summary>The signed-in owner (their saved looks).</summary>
+    [Parameter, EditorRequired] public string UserId { get; set; } = "";
+
+    [Parameter] public string Prefix { get; set; } = "poll-look";
+
+    private SavedLookList saved = SavedLookList.Empty;
+    private LookForm form = new();
+    private ThemeLook? formFor;
+    private string? name;
+    private string? message;
+    private bool ok, busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var list = await Looks.ListAsync(UserId);
+        saved = list;
+    }
+
+    protected override void OnParametersSet()
+    {
+        // The form follows the value when it changed from outside (a saved look picked, a draft reloaded).
+        if (Value is { } v && v != formFor)
+        {
+            form = LookForm.From(v);
+            formFor = v;
+        }
+    }
+
+    /// <summary>The select's value: the saved look equal to the poll's, else Custom; the instance theme for none.</summary>
+    private string Picked => Value is not { } v ? InstanceValue
+        : saved.Looks.FirstOrDefault(s => s.Look == v) is { } match ? match.Id.ToString() : CustomValue;
+
+    private async Task PickAsync(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? "";
+        message = null;
+        ThemeLook? next = value switch
+        {
+            InstanceValue => null,
+            CustomValue => Value ?? Theme.Settings.Look, // start from what the poll shows now
+            _ => saved.Looks.FirstOrDefault(s => s.Id.ToString() == value)?.Look ?? Value,
+        };
+        await SetAsync(next);
+    }
+
+    private async Task FieldsChangedAsync()
+    {
+        message = null;
+        if (form.ToLook().Look is { } look) await SetAsync(look, fromForm: true);
+    }
+
+    private async Task SetAsync(ThemeLook? look, bool fromForm = false)
+    {
+        if (fromForm) formFor = look;
+        else if (look is not null)
+        {
+            form = LookForm.From(look);
+            formFor = look;
+        }
+        Value = look;
+        await ValueChanged.InvokeAsync(look);
+    }
+
+    private async Task SaveAsLookAsync()
+    {
+        if (Value is not { } look) return;
+        busy = true;
+        try
+        {
+            var result = await Looks.CreateAsync(UserId, name, look);
+            (ok, message) = (result.Ok, result.Ok ? "Look saved." : result.Error);
+            if (result.Ok)
+            {
+                var list = await Looks.ListAsync(UserId);
+                saved = list;
+                name = null;
+            }
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

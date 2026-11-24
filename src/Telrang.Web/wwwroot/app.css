@@ -192,8 +192,9 @@
 
 
 /* Bootstrap reads these; one mapping for both modes, the --av-* values switch. Same specificity as Bootstrap's
-   [data-bs-theme=dark] block and later, so these win there too. */
-:root {
+   [data-bs-theme=dark] block and later, so these win there too. Repeated on the look preview panels (DESIGN.md §34.7),
+   whose --av-* tokens /looks/preview.css sets, so the variables resolve to the look's values inside them. */
+:root, .look-preview {
     --bs-body-font-family: var(--av-font);
     --bs-body-bg: var(--av-surface);
     --bs-body-bg-rgb: var(--av-surface-rgb);
@@ -1727,3 +1728,23 @@ button.dates-cell:hover:not(:disabled) { border-color: var(--av-primary); }
     .editor-tabs { flex-wrap: nowrap; gap: 0; overflow-x: auto; }
     .editor-tab { flex: 0 0 auto; padding: 0.5rem 0.625rem; font-size: 0.9375rem; }
 }
+
+/* ---- Looks (DESIGN.md §34.6, §34.7) -------------------------------------------------------------
+   The preview panels take their --av-* tokens from /looks/preview.css (scoped to .look-preview-light / -dark); the
+   Bootstrap mapping above is repeated on .look-preview, so everything inside resolves to the look. */
+.look-preview-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.75rem; }
+.look-preview {
+    overflow: hidden; border: 1px solid var(--av-border); border-radius: var(--bs-border-radius);
+    background-color: var(--av-canvas); color: var(--bs-body-color); font-family: var(--bs-body-font-family);
+}
+.look-preview-header {
+    display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.75rem; border-top: 3px solid var(--av-header-band);
+    border-bottom: 1px solid var(--av-border); background-color: var(--av-surface); font-size: 0.875rem; font-weight: 600;
+    color: var(--av-text-strong);
+}
+.look-preview-mark { display: inline-block; width: 0.875rem; height: 0.875rem; border-radius: calc(var(--av-radius) * 0.5); background-color: var(--av-primary); }
+.look-preview-body { margin: 0.75rem; padding: 0.75rem; border: 1px solid var(--av-border); border-radius: var(--bs-border-radius); background-color: var(--av-surface); }
+.look-preview .bar { max-width: none; }
+.look-preview-link { color: var(--av-link); text-decoration: underline; }
+.look-swatches { flex: 0 0 auto; width: 4.4rem; height: 1rem; }
+.look-swatches rect { stroke: var(--av-border-strong); stroke-width: 0.5; }

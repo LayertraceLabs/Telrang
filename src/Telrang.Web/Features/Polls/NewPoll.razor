@@ -6,6 +6,7 @@
 @inject UserManager<ApplicationUser> Users
 @inject NavigationManager Nav
 @inject SettingsService Settings
+@inject LookService Looks
 
 <PageTitle>New poll - @AppOptions.Value.Name</PageTitle>
 
@@ -31,7 +32,7 @@
 @if (initial is not null)
 {
     <PollEditor @ref="editor" @key="editorKey" Initial="initial" Validated="OnValidated" DefaultTimeZone="@defaultZone" BrowserTimeZone="@browserZone" DraftKey="@draftKey" ReplaceDraft="@(copyOf is not null)"
-                MaxDurationDays="@(limits?.PollDurationDays ?? 0)">
+                MaxDurationDays="@(limits?.PollDurationDays ?? 0)" InitialLook="initialLook" ShowLook="showLook" UserId="@userId">
         @if (message is not null)
         {
             <div class="alert alert-danger mt-3" role="alert">@message</div>
@@ -50,6 +51,9 @@
     [SupplyParameterFromQuery(Name = "from")] public string? From { get; set; }
 
     private PollDraft? initial;
+    private ThemeLook? initialLook;
+    private bool showLook;
+    private string? userId;
     private string? copyOf;
     private string editorKey = "";
     private string? message;
@@ -68,21 +72,24 @@
         // Everything is loaded before the editor gets its draft: the page renders while it awaits (at once on a truly
         // async database), and the editor applies the default zone only when it first loads a draft.
         PollDraft draft;
+        ThemeLook? startLook;
         string? from = null;
         if (!string.IsNullOrEmpty(From))
         {
-            var copy = await Polls.GetCopyAsync(userId, From);
+            var copy = await Polls.GetCopyWithLookAsync(userId, From);
             if (copy is null)
             {
                 Nav.NotFound(); // foreign and unknown polls alike
                 return;
             }
-            draft = copy;
+            draft = copy.Draft;
+            startLook = copy.Look; // a copy copies the look (DESIGN.md §34.7)
             from = From;
         }
         else
         {
             draft = new PollDraft();
+            startLook = await Looks.DefaultLookAsync(userId); // new polls start with the default look
         }
         var isVerified = await Polls.HasVerifiedEmailAsync(userId);
         // DESIGN.md §23.5: the account's zone when set; else, for a blank poll, the browser's (set by the editor), else UTC.
@@ -96,6 +103,9 @@
         draftKey = PollEditor.DraftKeyFor(userId, null);
         copyOf = from;
         editorKey = copyOf ?? "new";
+        showLook = Settings.Current.PollLooks;
+        initialLook = startLook;
+        this.userId = userId;
         initial = draft;
     }
 
@@ -118,7 +128,8 @@
         {
             var userId = Users.GetUserId((await AuthState).User);
             if (userId is null) { message = "You are signed out. Sign in again."; return; }
-            var result = await Polls.CreatePollAsync(userId, editor.Current);
+            // While poll looks are off the editor shows no look: the poll gets none.
+            var result = await Polls.CreatePollAsync(userId, editor.Current, Settings.Current.PollLooks ? editor.CurrentLook : null);
             if (result.Succeeded)
             {
                 await editor.MarkSavedAsync();

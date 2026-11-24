@@ -50,6 +50,18 @@ public sealed partial class PollEditor : IAsyncDisposable
     /// <summary>Raised after each change with the validation Result (definition or errors).</summary>
     [Parameter] public EventCallback<DraftResult> Validated { get; set; }
 
+    /// <summary>
+    /// The poll's look to start from (DESIGN.md §34.6, §34.7): the stored one on edit, the copied poll's on a copy, else the
+    /// account's default look; null = the instance theme.
+    /// </summary>
+    [Parameter] public Branding.ThemeLook? InitialLook { get; set; }
+
+    /// <summary>The admin setting "Poll looks" is on: the Look tab (structured) and section (simple) are shown.</summary>
+    [Parameter] public bool ShowLook { get; set; }
+
+    /// <summary>The signed-in owner, for their saved looks.</summary>
+    [Parameter] public string? UserId { get; set; }
+
     /// <summary>The page's buttons and messages, rendered under the form.</summary>
     [Parameter] public RenderFragment? ChildContent { get; set; }
 
@@ -73,7 +85,7 @@ public sealed partial class PollEditor : IAsyncDisposable
     /// <summary>The simple editor shows the question's text fields: the question has a text or help (left from a structured draft).</summary>
     private bool simpleText;
 
-    private enum EditorTab { Questions, Voting, Preview }
+    private enum EditorTab { Questions, Voting, Look, Preview }
     private enum AddKind { Question, Group, Page }
     private EditorTab tab = EditorTab.Questions;
 
@@ -97,6 +109,13 @@ public sealed partial class PollEditor : IAsyncDisposable
     /// <summary>The draft as the form shows it now.</summary>
     public PollDraft Current => draft;
 
+    private Branding.ThemeLook? look;
+
+    /// <summary>The poll's look as the form shows it now (null = the instance theme). Not part of the draft: not in the browser draft.</summary>
+    public Branding.ThemeLook? CurrentLook => look;
+
+    private void LookChanged(Branding.ThemeLook? value) => look = value;
+
     /// <summary>The form can be saved: no field errors and no unparsed option text.</summary>
     public bool IsValid => Result.Success && !ctx.TextInvalid;
 
@@ -110,6 +129,7 @@ public sealed partial class PollEditor : IAsyncDisposable
             Changed = EventCallback.Factory.Create<string>(this, ChangedAsync),
             Today = () => Today,
         };
+        look = InitialLook;
         Load(Copy(Initial), asBaseline: true);
     }
 

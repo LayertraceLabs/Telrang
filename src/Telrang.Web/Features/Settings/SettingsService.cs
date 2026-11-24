@@ -76,6 +76,9 @@ public static class SettingKeys
 
     public const string HomeWelcomeMarkdown = "Home.WelcomeMarkdown";
 
+    /// <summary>Poll looks (DESIGN.md §34.6): on by default (no row); "false" = every poll shows the instance theme.</summary>
+    public const string PollLooksEnabled = "Polls.LooksEnabled";
+
     /// <summary>Days after closing that a poll is deleted automatically; missing or 0 = never (default).</summary>
     public const string RetentionDeleteClosedAfterDays = "Retention.DeleteClosedAfterDays";
 
@@ -236,7 +239,8 @@ public sealed record AppSettingsSnapshot(
     Branding.ThemeSettings Theme,
     string? WelcomeMarkdown,
     int RetentionDays = 0,
-    bool AutoVerifyWithoutMail = false)
+    bool AutoVerifyWithoutMail = false,
+    bool PollLooks = true)
 {
     public int Int(string key, int fallback) =>
         Raw.TryGetValue(key, out var v) && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? i : fallback;
@@ -423,7 +427,8 @@ public sealed class SettingsService(
             Branding.ThemeSettings.From(Str),
             Str(SettingKeys.HomeWelcomeMarkdown),
             Int(SettingKeys.RetentionDeleteClosedAfterDays, 0),
-            bool.TryParse(Str(SettingKeys.AutoVerifyWithoutMail), out var autoVerify) && autoVerify);
+            bool.TryParse(Str(SettingKeys.AutoVerifyWithoutMail), out var autoVerify) && autoVerify,
+            !(bool.TryParse(Str(SettingKeys.PollLooksEnabled), out var looks) && !looks));
     }
 }
 

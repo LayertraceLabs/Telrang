@@ -15,6 +15,7 @@
                     <span class="user-name">@(name ?? "Account")</span>
                 </div>
                 <NavLink class="app-nav-link" href="Account/Manage"><Icon Name="user" /><span>Account</span></NavLink>
+                <NavLink class="app-nav-link" href="looks"><Icon Name="palette" /><span>Looks</span></NavLink>
                 <form action="Account/Logout" method="post">
                     <AntiforgeryToken />
                     <input type="hidden" name="ReturnUrl" value="@currentUrl" />
@@ -47,6 +48,7 @@
                         </div>
                     }
                     <a class="menu-item" href="Account/Manage"><Icon Name="user" />Account</a>
+                    <a class="menu-item" href="looks"><Icon Name="palette" />Looks</a>
                     <form action="Account/Logout" method="post">
                         <AntiforgeryToken />
                         <input type="hidden" name="ReturnUrl" value="@currentUrl" />

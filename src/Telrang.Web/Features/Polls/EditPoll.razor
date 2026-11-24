@@ -5,6 +5,7 @@
 @inject PollService Polls
 @inject UserManager<ApplicationUser> Users
 @inject NavigationManager Nav
+@inject SettingsService Settings
 
 <PageTitle>Edit poll - @AppOptions.Value.Name</PageTitle>
 
@@ -18,7 +19,8 @@
     </PageHeader>
 
     <PollEditor @ref="editor" Initial="initial!" Existing="model.Definition" Validated="OnValidated" DefaultTimeZone="@model.Definition.TimeZone"
-                DraftKey="@draftKey" MaxDurationDays="@durationDays" CreatedAt="@model.CreatedAt" StoredClosesAt="@model.ClosesAt">
+                DraftKey="@draftKey" MaxDurationDays="@durationDays" CreatedAt="@model.CreatedAt" StoredClosesAt="@model.ClosesAt"
+                InitialLook="model.Look" ShowLook="showLook" UserId="@userId">
         @if (pending.Count > 0)
         {
             @* DESIGN.md §26: what the change log will record, before saving. *@
@@ -58,6 +60,8 @@
     private int durationDays;
     private string? draftKey;
     private PollEditor? editor;
+    private bool showLook;
+    private string? userId;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -71,6 +75,8 @@
             return;
         }
         var days = (await Polls.LimitsForAsync(userId!)).PollDurationDays;
+        showLook = Settings.Current.PollLooks;
+        this.userId = userId;
         model = loaded;
         durationDays = days;
         draftKey = PollEditor.DraftKeyFor(userId, Id);
@@ -99,7 +105,10 @@
         {
             var userId = Users.GetUserId((await AuthState).User);
             if (userId is null) return;
-            var result = await Polls.UpdatePollAsync(userId, Id, editor.Current);
+            // The look is saved with the poll (DESIGN.md §34.6); while poll looks are off the stored one is kept as it is.
+            var result = Settings.Current.PollLooks
+                ? await Polls.UpdatePollAsync(userId, Id, editor.Current, editor.CurrentLook)
+                : await Polls.UpdatePollAsync(userId, Id, editor.Current);
             switch (result.Status)
             {
                 case PollSaveStatus.Ok:

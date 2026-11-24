@@ -605,6 +605,8 @@ public sealed class AdminService(
         if (!await IsAdminAsync(caller)) return AdminOutcome.Denied;
         if (ThemeSettings.Validate(values) is { } invalid) return new AdminOutcome(false, invalid);
         if (LimitProblem(values) is { } limitProblem) return new AdminOutcome(false, limitProblem);
+        if (values.TryGetValue(SettingKeys.PollLooksEnabled, out var looks) && !string.IsNullOrWhiteSpace(looks) && !bool.TryParse(looks.Trim(), out _))
+            return new AdminOutcome(false, "Poll looks: true or false.");
         if (values.TryGetValue(SettingKeys.PublicUrl, out var publicUrl) && SettingsService.PublicUrlProblem(publicUrl) is { } urlProblem)
             return new AdminOutcome(false, urlProblem);
         (var mailProblem, values) = BindMailCredential(values);
