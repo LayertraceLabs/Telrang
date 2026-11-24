@@ -21,12 +21,16 @@ public sealed record PollSaveResult(PollSaveStatus Status, string? EncodedId, IR
     public bool Succeeded => Status == PollSaveStatus.Ok;
 }
 
-public sealed record PollSummary(string EncodedId, string Title, PollType Type, int BallotCount, bool IsClosed, DateTimeOffset CreatedAt);
+public sealed record PollSummary(string EncodedId, string Title, PollType Type, int BallotCount, bool IsClosed, DateTimeOffset CreatedAt,
+    int QuestionCount = 1, int PageCount = 1)
+{
+    /// <summary>The type of a simple poll, the size of a structured one (DESIGN.md §34.1).</summary>
+    public string Kind => PollText.KindLine(Type, QuestionCount, PageCount);
+}
 
-/// <param name="AnswersPerKey">Per option key of the stored definition: the ballots that answered it (the editor's preview of
-/// a removal, DESIGN.md §26).</param>
-public sealed record PollEditModel(string EncodedId, PollDefinition Definition, int BallotCount,
-    IReadOnlyDictionary<string, int>? AnswersPerKey = null)
+/// <param name="Answers">Per question and option of the stored definition: the ballots that answered it (the editor's preview
+/// of a removal, DESIGN.md §26, §34.5).</param>
+public sealed record PollEditModel(string EncodedId, PollDefinition Definition, int BallotCount, AnswerCounts? Answers = null)
 {
     public DateTimeOffset CreatedAt { get; init; }
 
@@ -213,7 +217,7 @@ public sealed class PollService(
     /// <summary>The work of an edit done outside the write transaction.</summary>
     private sealed record EditPass(PollSaveResult? Refusal, string EncodedId = "", string StoredJson = "", PollDefinition? Stored = null,
         PollDefinition? Updated = null, EffectiveLimits? OwnerLimits = null, int BallotCount = 0,
-        IReadOnlyList<OptionChange>? Changes = null, IReadOnlyDictionary<string, int>? Answers = null);
+        IReadOnlyList<OptionChange>? Changes = null, AnswerCounts? Answers = null);
 
     private async Task<EditPass> PrepareEditAsync(string userId, string encodedId, PollDraft draft, CancellationToken ct)
     {
@@ -232,14 +236,13 @@ public sealed class PollService(
             : parsed.Definition!;
 
         var changes = Changes(a.Definition, updated);
-        var removed = changes.Where(c => c.Kind == OptionChangeKind.Removed).Select(c => c.Key).ToList();
         var count = await db.Ballots.CountAsync(b => b.PollId == a.Poll.Id, ct);
-        IReadOnlyDictionary<string, int>? answers = null;
-        if (count > 0 && removed.Count > 0)
+        AnswerCounts? answers = null;
+        if (count > 0 && changes.Any(c => PollText.IsRemoval(c.Kind)))
         {
             var payloads = await db.Ballots.AsNoTracking().Where(b => b.PollId == a.Poll.Id).Select(b => b.PayloadJson).ToListAsync(ct);
             count = payloads.Count;
-            answers = PollJson.AnswerCounts(payloads, a.Definition.Questions[0], removed);
+            answers = PollJson.CountAnswers(payloads, a.Definition);
         }
         return new EditPass(null, a.EncodedId, a.Poll.DefinitionJson, a.Definition, updated, ownerLimits, count, changes, answers);
     }
@@ -295,7 +298,9 @@ public sealed class PollService(
                     Kind = c.Kind,
                     Label = Clip(c.Label),
                     OldLabel = c.OldLabel is null ? null : Clip(c.OldLabel),
-                    BallotCount = c.Kind == OptionChangeKind.Removed ? pass.Answers?.GetValueOrDefault(c.Key) ?? 0 : null,
+                    BallotCount = PollText.IsRemoval(c.Kind) ? pass.Answers?.For(c) ?? 0 : null,
+                    QuestionKey = c.QuestionKey is { Length: <= PollChange.MaxKeyLength } k ? k : null,
+                    QuestionLabel = c.QuestionLabel is null ? null : Clip(c.QuestionLabel),
                 });
             }
             await CapChangeLogAsync(db, poll.Id, changes.Count, ct);
@@ -312,9 +317,17 @@ public sealed class PollService(
         return new PollSaveResult(PollSaveStatus.Ok, a.EncodedId, [], "Saved.", changes);
     }
 
-    /// <summary>The changes an edit records (DESIGN.md §26, §31): title, description and the single question's options.</summary>
-    public static IReadOnlyList<OptionChange> Changes(PollDefinition stored, PollDefinition updated) =>
-        OptionChanges.Between(stored, updated);
+    /// <summary>
+    /// The changes an edit records (DESIGN.md §26, §31, §34.5): title, description, the questions added, removed and renamed,
+    /// and their options. Option entries name their question (<see cref="OptionChange.QuestionLabel"/>) only when the poll has
+    /// several questions before or after the edit; in a simple poll the question is the poll.
+    /// </summary>
+    public static IReadOnlyList<OptionChange> Changes(PollDefinition stored, PollDefinition updated)
+    {
+        var all = OptionChanges.Between(stored, updated);
+        var named = stored.Questions.Count > 1 || updated.Questions.Count > 1;
+        return all.Select(c => PollText.IsOptionChange(c.Kind) ? c with { QuestionLabel = named ? c.QuestionLabel : null } : c).ToList();
+    }
 
     /// <summary>
     /// Keeps the poll's change log at <see cref="PollChange.MaxEntries"/> entries (DESIGN.md §31): when the
@@ -349,16 +362,14 @@ public sealed class PollService(
 
     private static string Clip(string label) => label.Length <= PollChange.MaxLabelLength ? label : label[..PollChange.MaxLabelLength];
 
-    /// <summary>The poll for the editor, with the ballots that answered each option (one parse per ballot, no lock).</summary>
+    /// <summary>The poll for the editor, with the ballots that answered each question and option (one parse per ballot, no lock).</summary>
     public async Task<PollEditModel?> GetForEditAsync(string userId, string encodedId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var a = await access.GetAsync(db, encodedId, VisitorContext.ForUser(userId), tracking: false, ct);
         if (a is null || !a.CanEdit) return null;
         var payloads = await db.Ballots.AsNoTracking().Where(b => b.PollId == a.Poll.Id).Select(b => b.PayloadJson).ToListAsync(ct);
-        var q = a.Definition.Questions[0];
-        var perKey = PollJson.AnswerCounts(payloads, q, q.Options.Select(o => o.Key));
-        return new PollEditModel(a.EncodedId, a.Definition, payloads.Count, perKey)
+        return new PollEditModel(a.EncodedId, a.Definition, payloads.Count, PollJson.CountAnswers(payloads, a.Definition))
         {
             CreatedAt = a.Poll.CreatedAt,
             ClosesAt = a.Poll.ClosesAt,

@@ -279,13 +279,13 @@ public class ChangeLogTests
         var id = await CreatePollAsync(factory, owner, Lunch());
         Assert.True((await SubmitRankedAsync(factory, id, new VisitorContext(null, "v1", null), new RankedBallot(["pizza", "pasta"], []))).Succeeded);
         var model = (await Polls(factory, p => p.GetForEditAsync(owner, id)))!;
-        Assert.Equal(1, model.AnswersPerKey!["pizza"]);
-        Assert.Equal(0, model.AnswersPerKey["salad"]);
+        Assert.Equal(1, model.Answers!.Options["q1"]["pizza"]);
+        Assert.Equal(0, model.Answers.Options["q1"]["salad"]);
         var after = PollDraft.FromDefinition(model.Definition);
         after.Questions[0].Options.RemoveAt(0);
         var def = PollParsing.Validate(after, PollLimits.Default, existing: model.Definition).Definition!;
         var change = Assert.Single(PollService.Changes(model.Definition, def));
-        Assert.Equal("“Pizza” removed (on 1 ballot)", PollText.ChangeText(change.Kind, change.Label, change.OldLabel, model.AnswersPerKey[change.Key]));
+        Assert.Equal("“Pizza” removed (on 1 ballot)", PollText.ChangeText(change.Kind, change.Label, change.OldLabel, model.Answers.For(change)));
         Assert.Equal("“Salad” removed (on no ballots)", PollText.ChangeText(OptionChangeKind.Removed, "Salad", null, 0));
         Assert.Equal("“A” renamed to “B”", PollText.ChangeText(OptionChangeKind.Renamed, "B", "A", null));
         Assert.Equal("Details of “A” changed", PollText.ChangeText(OptionChangeKind.DetailsChanged, "A", null, null));

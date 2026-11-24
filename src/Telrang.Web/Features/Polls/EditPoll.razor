@@ -27,8 +27,8 @@
                 <ul class="mb-0">
                     @foreach (var c in pending)
                     {
-                        <li><ChangeLine Kind="c.Kind" Label="@c.Label" OldLabel="@c.OldLabel"
-                            BallotCount="@(c.Kind == OptionChangeKind.Removed ? model.AnswersPerKey?.GetValueOrDefault(c.Key) ?? 0 : null)" /></li>
+                        <li><ChangeLine Kind="c.Kind" Label="@c.Label" OldLabel="@c.OldLabel" Question="@c.QuestionLabel"
+                            BallotCount="@(PollText.IsRemoval(c.Kind) ? (model.Answers ?? AnswerCounts.None).For(c) : null)" /></li>
                     }
                 </ul>
             </div>
@@ -53,7 +53,7 @@
     private bool busy, ok;
     private bool canSave = true;
     private string? message;
-    /// <summary>The option changes the change log would record on save (only once the poll has a ballot).</summary>
+    /// <summary>The changes the change log would record on save (only once the poll has a ballot).</summary>
     private IReadOnlyList<OptionChange> pending = [];
     private int durationDays;
     private string? draftKey;

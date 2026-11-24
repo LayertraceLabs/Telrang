@@ -188,44 +188,73 @@ public static class PollJson
     public static NumberBallot? ReadNumber(string json, PollQuestion q) => DeserializeNumber(json, q.Key);
 
     /// <summary>
-    /// Per key of <paramref name="keys"/>: how many stored payloads answered it (ranked or banned, points above 0, yes or
-    /// maybe, picked): the ballot counts of removals in the change log and the editor's preview. One parse per payload, whatever
-    /// the number of keys (DESIGN.md §31, pentest R3-VOTE-3 / R3-RES-5).
+    /// For every question of <paramref name="def"/>: how many stored payloads answered it (have a part for it), and per option
+    /// how many answered that option (ranked or banned, points above 0, yes or maybe, picked). The ballot counts of removals in
+    /// the change log and the editor's preview (DESIGN.md §26, §34.5). One parse per payload, whatever the number of questions
+    /// and options (pentest R3-VOTE-3 / R3-RES-5).
     /// </summary>
-    public static Dictionary<string, int> AnswerCounts(IEnumerable<string> payloads, PollQuestion q, IEnumerable<string> keys)
+    public static AnswerCounts CountAnswers(IEnumerable<string> payloads, PollDefinition def)
     {
         ArgumentNullException.ThrowIfNull(payloads);
-        ArgumentNullException.ThrowIfNull(q);
-        var counts = keys.Distinct(StringComparer.Ordinal).ToDictionary(k => k, _ => 0, StringComparer.Ordinal);
-        if (counts.Count == 0) return counts;
+        ArgumentNullException.ThrowIfNull(def);
+        var questions = def.Questions.ToDictionary(q => q.Key, _ => 0, StringComparer.Ordinal);
+        var options = def.Questions.ToDictionary(q => q.Key, q => q.Options.ToDictionary(o => o.Key, _ => 0, StringComparer.Ordinal), StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var json in payloads)
         {
-            seen.Clear();
-            switch (q.Type)
+            using var doc = JsonDocument.Parse(json);
+            foreach (var q in def.Questions)
             {
-                case PollType.Ranked:
-                    var r = DeserializeRanked(json, q.Key);
-                    foreach (var k in r.Ranked) seen.Add(k);
-                    foreach (var k in r.Banned) seen.Add(k);
-                    break;
-                case PollType.Points:
-                    foreach (var (k, v) in DeserializePoints(json, q.Key).Points) if (v > 0) seen.Add(k);
-                    break;
-                case PollType.Dates:
-                    foreach (var (k, v) in DeserializeDates(json, q.Key).Answers) if (v is Availability.Yes or Availability.Maybe) seen.Add(k);
-                    break;
-                case PollType.Choice:
-                    foreach (var k in DeserializeChoice(json, q.Key).Keys) seen.Add(k);
-                    break;
-                case PollType.Text:
-                case PollType.Number:
-                    break; // no options
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
+                if (!TryPart(doc.RootElement, q.Key, out var part)) continue;
+                questions[q.Key]++;
+                seen.Clear();
+                switch (q.Type)
+                {
+                    case PollType.Ranked:
+                        var r = RankedFrom(part);
+                        foreach (var k in r.Ranked) seen.Add(k);
+                        foreach (var k in r.Banned) seen.Add(k);
+                        break;
+                    case PollType.Points:
+                        foreach (var (k, v) in PointsFrom(part).Points) if (v > 0) seen.Add(k);
+                        break;
+                    case PollType.Dates:
+                        foreach (var (k, v) in DatesFrom(part).Answers) if (v is Availability.Yes or Availability.Maybe) seen.Add(k);
+                        break;
+                    case PollType.Choice:
+                        foreach (var k in ChoiceFrom(part).Keys) seen.Add(k);
+                        break;
+                    case PollType.Text:
+                    case PollType.Number:
+                        break; // no options
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(def), q.Type, null);
+                }
+                var counts = options[q.Key];
+                foreach (var k in seen) if (counts.TryGetValue(k, out var n)) counts[k] = n + 1;
             }
-            foreach (var k in seen) if (counts.TryGetValue(k, out var n)) counts[k] = n + 1;
         }
-        return counts;
+        return new AnswerCounts(questions, options.ToDictionary(x => x.Key, x => (IReadOnlyDictionary<string, int>)x.Value, StringComparer.Ordinal));
+    }
+}
+
+/// <summary>
+/// How many stored ballots answered each question (<see cref="Questions"/>, by question key) and each option
+/// (<see cref="Options"/>, by question key, then option key) of a definition (<see cref="PollJson.CountAnswers"/>).
+/// </summary>
+public sealed record AnswerCounts(IReadOnlyDictionary<string, int> Questions, IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> Options)
+{
+    public static readonly AnswerCounts None = new(new Dictionary<string, int>(), new Dictionary<string, IReadOnlyDictionary<string, int>>());
+
+    /// <summary>The ballot count a removal records: of the question, or of the option in its question; 0 for anything else.</summary>
+    public int For(OptionChange change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        return change.Kind switch
+        {
+            OptionChangeKind.QuestionRemoved => Questions.GetValueOrDefault(change.QuestionKey ?? change.Key),
+            OptionChangeKind.Removed when change.QuestionKey is { } q => Options.GetValueOrDefault(q)?.GetValueOrDefault(change.Key) ?? 0,
+            _ => 0,
+        };
     }
 }

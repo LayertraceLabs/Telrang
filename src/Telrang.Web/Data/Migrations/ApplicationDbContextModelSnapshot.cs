@@ -16,7 +16,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261124152939_MultiQuestionVoting";
+    public override string LastMigrationId => "20261124165050_QuestionChangeLog";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -690,6 +690,14 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .HasColumnType("TEXT");
 
                 b.Property<Guid>("PollId")
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("QuestionKey")
+                    .HasMaxLength(32)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("QuestionLabel")
+                    .HasMaxLength(200)
                     .HasColumnType("TEXT");
 
                 b.Property<int>("Seq")
