@@ -13,7 +13,7 @@ function guardSubmit(form) {
   if (form.dataset.voteReady) return;
   form.dataset.voteReady = '1';
   form.addEventListener('submit', e => {
-    if (e.submitter?.name === 'view') return; // layout switch without JS: not a save
+    if (e.submitter?.hasAttribute('data-view')) return; // layout switch without JS: not a save
     if (form.dataset.sent) {
       e.preventDefault(); // a second click while the first POST is on its way
       return;

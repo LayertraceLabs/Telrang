@@ -1,0 +1,59 @@
+@* Choice question fields inside the static vote form (DESIGN.md §34.3, §34.4). One field name (c) for every
+   display: a radio group (max 1), checkboxes (more) or a dropdown (max 1), the option key as value and Other as
+   "_other" with its text in a field of its own. Works without JS; BallotValidator on the server stays authoritative. *@
+@if (Question.Display == ChoiceDisplay.Dropdown && Question.MaxSelect == 1)
+{
+    <select class="form-select choice-select" id="@Values.Id("choice")" name="@Values.FieldName(BallotForm.ChoiceField)" aria-label="@Label">
+        <option value="" selected="@(Values.Picked.Count == 0 && !Values.OtherPicked)">—</option>
+        @foreach (var o in Question.Options)
+        {
+            <option value="@o.Key" selected="@Values.Picked.Contains(o.Key)" @key="o.Key">@o.Label</option>
+        }
+        @if (Question.AllowOther)
+        {
+            <option value="@BallotForm.OtherValue" selected="@Values.OtherPicked">Other</option>
+        }
+    </select>
+}
+else
+{
+    var type = Question.MaxSelect == 1 ? "radio" : "checkbox";
+    <ul class="list-unstyled choice-options mb-2" aria-label="@Label">
+        @foreach (var o in Question.Options)
+        {
+            var id = Values.Id("c-" + o.Key);
+            <li class="form-check choice-option" @key="o.Key">
+                <input class="form-check-input" type="@type" id="@id" name="@Values.FieldName(BallotForm.ChoiceField)" value="@o.Key"
+                       checked="@Values.Picked.Contains(o.Key)" />
+                <label class="form-check-label text-break" for="@id">@o.Label</label>
+                @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
+                {
+                    <div class="poll-markdown small text-secondary">@MarkdownRenderer.Render(o.DescriptionMarkdown)</div>
+                }
+            </li>
+        }
+        @if (Question.AllowOther)
+        {
+            <li class="form-check choice-option">
+                <input class="form-check-input" type="@type" id="@Values.Id("c-other")" name="@Values.FieldName(BallotForm.ChoiceField)"
+                       value="@BallotForm.OtherValue" checked="@Values.OtherPicked" />
+                <label class="form-check-label" for="@Values.Id("c-other")">Other</label>
+            </li>
+        }
+    </ul>
+}
+@if (Question.AllowOther)
+{
+    <label class="visually-hidden" for="@Values.Id("other-text")">Other answer</label>
+    <input type="text" class="form-control choice-other" id="@Values.Id("other-text")" name="@Values.FieldName(BallotForm.OtherTextField)"
+           maxlength="@TextMax" placeholder="Other" value="@Values.OtherText" />
+}
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public BallotForm Values { get; set; } = default!;
+    /// <summary>The question's name for assistive technology (its prompt, or the poll title in a simple poll).</summary>
+    [Parameter] public string Label { get; set; } = "";
+    /// <summary>The admin's limit for one text answer (the Other text).</summary>
+    [Parameter] public int TextMax { get; set; } = PollLimits.Default.TextAnswerMax;
+}

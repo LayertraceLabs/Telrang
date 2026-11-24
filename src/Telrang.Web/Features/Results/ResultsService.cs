@@ -193,7 +193,7 @@ public sealed class ResultsService(IDbContextFactory<ApplicationDbContext> dbFac
             case PollType.Choice:
             case PollType.Text:
             case PollType.Number:
-                throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
+                throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 3
             default:
                 throw new ArgumentOutOfRangeException(nameof(access), q.Type, null);
         }
@@ -265,7 +265,7 @@ public sealed class ResultsService(IDbContextFactory<ApplicationDbContext> dbFac
             case PollType.Choice:
             case PollType.Text:
             case PollType.Number:
-                throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
+                throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 3
             default:
                 throw new ArgumentOutOfRangeException(nameof(def), q.Type, null);
         }

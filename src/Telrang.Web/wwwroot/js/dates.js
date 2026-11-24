@@ -20,7 +20,8 @@ export function init(root) {
   const activePanel = () => panels.find(p => !p.hidden) ?? panels[0];
   const cells = panel => [...panel.querySelectorAll('[data-dates-cell]')];
   const keys = [...new Set(cells(root).map(c => c.dataset.key))];
-  const radios = key => root.querySelectorAll(`input[data-field="o.${CSS.escape(key)}"]`);
+  const pre = CSS.escape(root.dataset.prefix ?? ''); // the question's field prefix in a poll with several questions (§34.4)
+  const radios = key => root.querySelectorAll(`input[data-field="${pre}o.${CSS.escape(key)}"]`);
   const answer = key => [...radios(key)].find(r => r.checked)?.value ?? 'no';
 
   const announce = message => {

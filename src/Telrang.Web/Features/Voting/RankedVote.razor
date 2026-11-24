@@ -4,7 +4,7 @@
    buttons; CSS shows the ones of the zone it is in. ranking.js finds the fields by data-field, not name: the home page
    example (Preview) renders them without names. *@
 
-<div class="ranked-vote" data-ranked data-max-bans="@q.MaxBans">
+<div class="ranked-vote" data-ranked data-max-bans="@q.MaxBans" data-prefix="@(Values.Prefix.Length > 0 ? Values.Prefix : null)">
     <div class="visually-hidden" aria-live="polite" aria-atomic="true" data-announce></div>
 
     <fieldset class="rank-fields" data-rank-fields>
@@ -14,10 +14,10 @@
             @foreach (var o in q.Options)
             {
                 <li class="rank-field" @key="o.Key">
-                    <input id="pos-@o.Key" name="@(Preview ? null : BallotForm.Field(o.Key))" data-field="@BallotForm.Field(o.Key)" class="form-control rank-pos-input" type="number" inputmode="numeric"
+                    <input id="@Values.Id("pos-" + o.Key)" name="@(Preview ? null : Values.F(o.Key))" data-field="@Values.F(o.Key)" class="form-control rank-pos-input" type="number" inputmode="numeric"
                            min="1" max="@q.Options.Count" step="1" value="@Values.Positions.GetValueOrDefault(o.Key)" />
                     <span class="rank-label">
-                        <label class="fw-semibold" for="pos-@o.Key">@o.Label</label>
+                        <label class="fw-semibold" for="@Values.Id("pos-" + o.Key)">@o.Label</label>
                         @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
                         {
                             <details class="rank-details small">
@@ -29,9 +29,9 @@
                     @if (q.MaxBans > 0)
                     {
                         <span class="form-check rank-field-ban">
-                            <input class="form-check-input" type="checkbox" id="ban-@o.Key" name="@(Preview ? null : BallotForm.BanField(o.Key))" data-field="@BallotForm.BanField(o.Key)" value="1"
+                            <input class="form-check-input" type="checkbox" id="@Values.Id("ban-" + o.Key)" name="@(Preview ? null : Values.BanF(o.Key))" data-field="@Values.BanF(o.Key)" value="1"
                                    checked="@Values.Banned.Contains(o.Key)" />
-                            <label class="form-check-label" for="ban-@o.Key">Ban<span class="visually-hidden"> @o.Label</span></label>
+                            <label class="form-check-label" for="@Values.Id("ban-" + o.Key)">Ban<span class="visually-hidden"> @o.Label</span></label>
                         </span>
                     }
                 </li>
@@ -40,10 +40,10 @@
     </fieldset>
 
     <div class="ballot-editor rank-board" data-rank-board hidden>
-        <section class="rank-section" aria-labelledby="zone-ranked-title">
-            <h2 id="zone-ranked-title" class="h5 zone-title">Your ranking <span class="badge text-bg-primary" data-count="ranked">@ranked.Count</span></h2>
+        <section class="rank-section" aria-labelledby="@Values.Id("zone-ranked-title")">
+            <h2 id="@Values.Id("zone-ranked-title")" class="h5 zone-title">Your ranking <span class="badge text-bg-primary" data-count="ranked">@ranked.Count</span></h2>
             <p class="zone-hint" data-empty="ranked" hidden="@(ranked.Count > 0)">Nothing ranked yet.</p>
-            <ol class="rank-zone zone-ranked list-unstyled" data-zone="ranked" aria-labelledby="zone-ranked-title">
+            <ol class="rank-zone zone-ranked list-unstyled" data-zone="ranked" aria-labelledby="@Values.Id("zone-ranked-title")">
                 @for (var i = 0; i < ranked.Count; i++)
                 {
                     @Item(byKey[ranked[i]], i + 1)
@@ -51,10 +51,10 @@
             </ol>
         </section>
 
-        <section class="rank-section" aria-labelledby="zone-pool-title">
-            <h2 id="zone-pool-title" class="h5 zone-title">Not ranked <span class="badge text-bg-secondary" data-count="pool">@pool.Count</span></h2>
+        <section class="rank-section" aria-labelledby="@Values.Id("zone-pool-title")">
+            <h2 id="@Values.Id("zone-pool-title")" class="h5 zone-title">Not ranked <span class="badge text-bg-secondary" data-count="pool">@pool.Count</span></h2>
             <p class="zone-hint" data-empty="pool" hidden="@(pool.Count > 0)">All placed.</p>
-            <ul class="rank-zone zone-pool list-unstyled" data-zone="pool" aria-labelledby="zone-pool-title">
+            <ul class="rank-zone zone-pool list-unstyled" data-zone="pool" aria-labelledby="@Values.Id("zone-pool-title")">
                 @foreach (var key in pool)
                 {
                     @Item(byKey[key], null)
@@ -64,10 +64,10 @@
 
         @if (q.MaxBans > 0)
         {
-            <section class="rank-section" aria-labelledby="zone-banned-title">
-                <h2 id="zone-banned-title" class="h5 zone-title">Banned <span class="small fw-normal text-secondary"><span data-count="banned">@banned.Count</span> of @q.MaxBans @(q.MaxBans == 1 ? "ban" : "bans") used</span></h2>
+            <section class="rank-section" aria-labelledby="@Values.Id("zone-banned-title")">
+                <h2 id="@Values.Id("zone-banned-title")" class="h5 zone-title">Banned <span class="small fw-normal text-secondary"><span data-count="banned">@banned.Count</span> of @q.MaxBans @(q.MaxBans == 1 ? "ban" : "bans") used</span></h2>
                 <p class="zone-hint" data-empty="banned" hidden="@(banned.Count > 0)">No bans.</p>
-                <ul class="rank-zone zone-banned list-unstyled" data-zone="banned" aria-labelledby="zone-banned-title">
+                <ul class="rank-zone zone-banned list-unstyled" data-zone="banned" aria-labelledby="@Values.Id("zone-banned-title")">
                     @foreach (var key in banned)
                     {
                         @Item(byKey[key], null)

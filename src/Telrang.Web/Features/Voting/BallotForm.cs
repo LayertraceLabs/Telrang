@@ -6,13 +6,19 @@ using Microsoft.Extensions.Primitives;
 namespace Telrang.Web.Features.Voting;
 
 /// <summary>
-/// The vote form's fields (DESIGN.md §21.1) and the values a ballot editor renders: a saved ballot, or what was posted
-/// (re-rendered as typed after a refusal, so nothing is lost). Keys are the definition's option keys; unknown keys are
-/// ignored, missing ones mean "not ranked" / 0 / no. <see cref="BallotService"/> validation stays the authority.
+/// One question's fields in the vote form (DESIGN.md §21.1, §34.4) and the values its editor renders: a saved answer, the
+/// carry field's, or what was posted (re-rendered as typed after a refusal, so nothing is lost). Keys are the definition's
+/// option keys; unknown keys are ignored, missing ones mean "not ranked" / 0 / no / not picked. <see cref="BallotService"/>
+/// validation stays the authority. In a poll with several questions or pages every field name starts with
+/// <see cref="Prefix"/> (the question key and a dot: <c>q2.o.paris</c>); a simple poll has none, so its form is as before.
 /// </summary>
 public sealed class BallotForm
 {
     public const string OptionPrefix = "o.", BanPrefix = "b.";
+    /// <summary>Choice: the picked option keys (radio group, checkboxes or select), <see cref="OtherValue"/> for Other.</summary>
+    public const string ChoiceField = "c", OtherTextField = "other", TextField = "text", NumberField = "number";
+    /// <summary>The value of the Other choice; no option key can be it (slugs have no '_', edit keys are '_' + digits).</summary>
+    public const string OtherValue = "_other";
     public const string NameField = "name", NotifyField = "notify", FormIdField = "fid", ResponseField = "r";
     /// <summary>The no-JS layout switch of a dates ballot: a submit button that re-renders and saves nothing.</summary>
     public const string ViewField = "view";
@@ -32,64 +38,133 @@ public sealed class BallotForm
     /// <summary>Points: the field per option as typed (empty = 0).</summary>
     public Dictionary<string, string> Points { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, Availability> Answers { get; } = new(StringComparer.Ordinal);
+    /// <summary>Choice: the picked option keys.</summary>
+    public HashSet<string> Picked { get; } = new(StringComparer.Ordinal);
+    public bool OtherPicked { get; set; }
+    public string? OtherText { get; set; }
+    /// <summary>Text: the answer as typed.</summary>
+    public string? Text { get; set; }
+    /// <summary>Number: the value as typed.</summary>
+    public string? NumberText { get; set; }
     public string? Name { get; set; }
     public bool Notify { get; set; }
     public DatesView View { get; set; } = DatesView.Calendar;
+
+    /// <summary>Starts every field name of this question (empty in a simple poll).</summary>
+    public string Prefix { get; init; } = "";
 
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
     public static string Field(string key) => OptionPrefix + key;
     public static string BanField(string key) => BanPrefix + key;
 
-    /// <summary>The editor's start values: the saved response, or empty.</summary>
+    /// <summary>The field prefix of a question: none in a simple poll (one question, no pages or groups), else its key and a dot.</summary>
+    public static string PrefixFor(PollDefinition def, PollQuestion q) => VoteLayout.IsSimple(def) ? "" : q.Key + ".";
+
+    public string F(string key) => Prefix + OptionPrefix + key;
+    public string BanF(string key) => Prefix + BanPrefix + key;
+    public string FieldName(string field) => Prefix + field;
+    /// <summary>Element ids: the prefix with the dot as a dash, so ids stay unique per question and need no escaping.</summary>
+    public string Id(string id) => Prefix.Length == 0 ? id : Prefix.Replace('.', '-') + id;
+    public string ViewName => Prefix + ViewField;
+    public string ShownName => Prefix + ShownViewField;
+
+    /// <summary>The editor's start values: the saved response (its first question), or empty.</summary>
     public static BallotForm FromBallot(PollQuestion q, MyBallot? ballot)
     {
-        var f = new BallotForm { Name = ballot?.DisplayName, Notify = ballot?.NotifyOnClose ?? false };
+        var f = FromAnswer(q, ballot?.Answers.GetValueOrDefault(q.Key) ?? Legacy(ballot), "");
+        f.Name = ballot?.DisplayName;
+        f.Notify = ballot?.NotifyOnClose ?? false;
+        return f;
+    }
+
+    private static QuestionAnswer? Legacy(MyBallot? b) =>
+        b is null ? null : new QuestionAnswer { Ranked = b.Ranked, Points = b.Points, Dates = b.Dates };
+
+    /// <summary>One question's start values from an answer (stored, or from the carry field).</summary>
+    public static BallotForm FromAnswer(PollQuestion q, QuestionAnswer? answer, string prefix)
+    {
+        var f = new BallotForm { Prefix = prefix };
         var keys = q.Options.Select(o => o.Key).ToHashSet(StringComparer.Ordinal);
         switch (q.Type)
         {
             case PollType.Ranked:
-                var ranked = ballot?.Ranked?.Ranked.Where(keys.Contains).Distinct().ToList() ?? [];
+                var ranked = answer?.Ranked?.Ranked.Where(keys.Contains).Distinct().ToList() ?? [];
                 for (var i = 0; i < ranked.Count; i++) f.Positions[ranked[i]] = (i + 1).ToString(Inv);
-                foreach (var k in ballot?.Ranked?.Banned ?? []) if (keys.Contains(k) && !f.Positions.ContainsKey(k)) f.Banned.Add(k);
+                foreach (var k in answer?.Ranked?.Banned ?? []) if (keys.Contains(k) && !f.Positions.ContainsKey(k)) f.Banned.Add(k);
                 break;
             case PollType.Points:
-                foreach (var (k, v) in ballot?.Points?.Points ?? new Dictionary<string, int>())
+                foreach (var (k, v) in answer?.Points?.Points ?? new Dictionary<string, int>())
                     if (keys.Contains(k) && v > 0) f.Points[k] = v.ToString(Inv);
                 break;
             case PollType.Dates:
-                foreach (var (k, a) in ballot?.Dates?.Answers ?? new Dictionary<string, Availability>())
+                foreach (var (k, a) in answer?.Dates?.Answers ?? new Dictionary<string, Availability>())
                     if (keys.Contains(k) && (a != Availability.Maybe || q.Maybe)) f.Answers[k] = a;
                 break;
             case PollType.Choice:
+                foreach (var k in answer?.Choice?.Keys ?? []) if (keys.Contains(k)) f.Picked.Add(k);
+                f.OtherPicked = q.AllowOther && answer?.Choice?.Other == true;
+                f.OtherText = q.AllowOther ? answer?.OtherText : null;
+                break;
             case PollType.Text:
+                f.Text = answer?.Text;
+                break;
             case PollType.Number:
-                throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
+                f.NumberText = answer?.Number?.ToInvariantString();
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
         }
         return f;
     }
 
-    /// <summary>What was posted, as typed. Only the definition's keys are read.</summary>
+    /// <summary>What was posted for a simple poll's question, as typed, with the name and notify fields. Only the definition's keys are read.</summary>
     public static BallotForm FromForm(PollQuestion q, IFormCollection form, int maxNameLength)
     {
+        var f = FromForm(q, form, "");
         var name = Value(form, NameField);
-        var f = new BallotForm
+        // Re-rendered as typed, but never more than the field could hold (BallotService refuses longer names).
+        f.Name = name is null ? null : name.Length > maxNameLength * 2 ? name[..(maxNameLength * 2)] : name;
+        f.Notify = Value(form, NotifyField) is "1" or "on" or "true";
+        return f;
+    }
+
+    /// <summary>What was posted for one question (fields named with <paramref name="prefix"/>), as typed.</summary>
+    public static BallotForm FromForm(PollQuestion q, IFormCollection form, string prefix)
+    {
+        var f = new BallotForm { Prefix = prefix };
+        f.View = ParseView(Value(form, f.ViewName)) ?? ParseView(Value(form, f.ShownName)) ?? DatesView.Calendar;
+        switch (q.Type)
         {
-            // Re-rendered as typed, but never more than the field could hold (BallotService refuses longer names).
-            Name = name is null ? null : name.Length > maxNameLength * 2 ? name[..(maxNameLength * 2)] : name,
-            Notify = Value(form, NotifyField) is "1" or "on" or "true",
-            View = ParseView(Value(form, ViewField)) ?? ParseView(Value(form, ShownViewField)) ?? DatesView.Calendar,
-        };
+            case PollType.Choice:
+            {
+                var keys = q.Options.Select(o => o.Key).ToHashSet(StringComparer.Ordinal);
+                if (form.TryGetValue(f.FieldName(ChoiceField), out var picked))
+                {
+                    foreach (var v in picked)
+                    {
+                        if (v == OtherValue) f.OtherPicked = q.AllowOther;
+                        else if (v is not null && keys.Contains(v)) f.Picked.Add(v);
+                    }
+                }
+                if (q.AllowOther) f.OtherText = ClipText(Value(form, f.FieldName(OtherTextField)), null);
+                return f;
+            }
+            case PollType.Text:
+                f.Text = ClipText(Value(form, f.FieldName(TextField)), q.MaxLength);
+                return f;
+            case PollType.Number:
+                f.NumberText = Value(form, f.FieldName(NumberField)) is { } n ? Clip(n.Trim(), NumberBallotMaxText) : null;
+                return f;
+        }
         foreach (var o in q.Options)
         {
-            var raw = Value(form, Field(o.Key))?.Trim();
+            var raw = Value(form, f.F(o.Key))?.Trim();
             switch (q.Type)
             {
                 case PollType.Ranked:
                     if (!string.IsNullOrEmpty(raw)) f.Positions[o.Key] = Clip(raw);
-                    if (q.MaxBans > 0 && Value(form, BanField(o.Key)) is { Length: > 0 }) f.Banned.Add(o.Key);
+                    if (q.MaxBans > 0 && Value(form, f.BanF(o.Key)) is { Length: > 0 }) f.Banned.Add(o.Key);
                     break;
                 case PollType.Points:
                     if (!string.IsNullOrEmpty(raw)) f.Points[o.Key] = Clip(raw);
@@ -101,7 +176,7 @@ public sealed class BallotForm
                 case PollType.Choice:
                 case PollType.Text:
                 case PollType.Number:
-                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
+                    break; // read above
                 default:
                     throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
             }
@@ -109,8 +184,20 @@ public sealed class BallotForm
         return f;
     }
 
-    /// <summary>True when the dates layout switch was pressed (no JS): re-render, save nothing.</summary>
-    public static bool IsViewSwitch(IFormCollection form) => ParseView(Value(form, ViewField)) is not null;
+    /// <summary>Longest number text kept for a re-render (<see cref="NumberBallot.TryParse"/> reads at most 64 characters).</summary>
+    private const int NumberBallotMaxText = 64;
+
+    /// <summary>Free text re-rendered as typed, but never far more than the field may hold (the validator refuses longer text).</summary>
+    private static string? ClipText(string? text, int? max)
+    {
+        if (text is null) return null;
+        var cap = 2 * Math.Max(max ?? 0, PollLimits.Default.TextAnswerMax) + 16;
+        return text.Length > cap ? text[..cap] : text;
+    }
+
+    /// <summary>True when a dates layout switch was pressed (no JS): re-render, save nothing.</summary>
+    public static bool IsViewSwitch(IFormCollection form) => form.Keys.Any(k => (k == ViewField || k.EndsWith("." + ViewField, StringComparison.Ordinal))
+                                                                              && ParseView(Value(form, k)) is not null);
 
     public static DatesView? ParseView(string? value) => value switch
     {
@@ -132,7 +219,7 @@ public sealed class BallotForm
     public static string? CaptchaToken(IFormCollection form) =>
         Value(form, TurnstileField) is { Length: > 0 } t ? t : Value(form, HCaptchaField);
 
-    private static string Clip(string s) => s.Length > 12 ? s[..12] : s;
+    private static string Clip(string s, int max = 12) => s.Length > max ? s[..max] : s;
 
     // ---- to ballots --------------------------------------------------------------------------------
 
@@ -172,6 +259,46 @@ public sealed class BallotForm
     }
 
     public DatesBallot ToDates() => new(new Dictionary<string, Availability>(Answers, StringComparer.Ordinal));
+
+    public const string NumberFormatMessage = "Enter a number such as 12.5.";
+
+    /// <summary>
+    /// The posted fields as an answer of <paramref name="q"/>'s type; null with <paramref name="errors"/> when they cannot
+    /// become one (ranked positions, points or a number that are no numbers). Rules are the validator's (<see cref="ResponseAnswers.Validate"/>).
+    /// </summary>
+    public QuestionAnswer? ToAnswer(PollQuestion q, List<string> errors)
+    {
+        switch (q.Type)
+        {
+            case PollType.Ranked:
+                return ToRanked(q, errors) is { } r ? new QuestionAnswer { Ranked = r } : null;
+            case PollType.Points:
+                return ToPoints(q, errors) is { } p ? new QuestionAnswer { Points = p } : null;
+            case PollType.Dates:
+                return new QuestionAnswer { Dates = ToDates() };
+            case PollType.Choice:
+                return new QuestionAnswer
+                {
+                    Choice = new ChoiceBallot(q.Options.Select(o => o.Key).Where(Picked.Contains).ToList(), OtherPicked),
+                    OtherText = string.IsNullOrWhiteSpace(OtherText) ? null : OtherText.Trim(),
+                };
+            case PollType.Text:
+                return new QuestionAnswer { Text = string.IsNullOrWhiteSpace(Text) ? null : Text.Trim() };
+            case PollType.Number:
+            {
+                var text = NumberText?.Trim();
+                if (string.IsNullOrEmpty(text)) return new QuestionAnswer();
+                if (text.Length > NumberBallotMaxText || !decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, Inv, out var v))
+                {
+                    Add(errors, NumberFormatMessage);
+                    return null;
+                }
+                return new QuestionAnswer { Number = new NumberBallot(v) };
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
+        }
+    }
 
     /// <summary>The ranked order the drag zones show: by position (ties in option order), then the unranked options.</summary>
     public List<string> RankedOrder(PollQuestion q)

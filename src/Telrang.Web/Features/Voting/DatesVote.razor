@@ -4,16 +4,16 @@
    answers; dates.js switches client-side, turns calendar and timeline cells into cycling buttons and keeps the tally
    current. BallotValidator on the server stays authoritative (unknown options, maybe while maybe: no). *@
 
-<div class="dates-vote" data-dates-vote data-maybe="@(Question.Maybe ? "true" : "false")">
+<div class="dates-vote" data-dates-vote data-maybe="@(Question.Maybe ? "true" : "false")" data-prefix="@(Values.Prefix.Length > 0 ? Values.Prefix : null)">
     <div class="visually-hidden" aria-live="polite" aria-atomic="true" data-announce></div>
     @if (!Preview)
     {
-        <input type="hidden" name="@BallotForm.ShownViewField" value="@BallotForm.ViewValue(Values.View)" data-shown-view />
+        <input type="hidden" name="@Values.ShownName" value="@BallotForm.ViewValue(Values.View)" data-shown-view />
     }
-    <DatesViews Options="Question.Options" FormView="Values.View" Preview="Preview">
+    <DatesViews Options="Question.Options" FormView="Values.View" Preview="Preview" ViewName="@Values.ViewName">
         <Cell>
             <DatesCell Option="context.Option" View="context.View" Value="@Values.AnswerOf(context.Option.Key)"
-                       AllowMaybe="Question.Maybe" Active="@(context.View == Values.View)" Preview="Preview" />
+                       AllowMaybe="Question.Maybe" Active="@(context.View == Values.View)" Preview="Preview" Prefix="@Values.Prefix" />
         </Cell>
     </DatesViews>
 </div>

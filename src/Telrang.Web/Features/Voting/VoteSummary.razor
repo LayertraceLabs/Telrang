@@ -66,7 +66,11 @@ else
         PollType.Ranked => "Your ranking",
         PollType.Points => "Your points",
         PollType.Dates => "Your availability",
-        PollType.Choice or PollType.Text or PollType.Number => throw new NotSupportedException(), // §34 step 2
+        PollType.Choice => "Your choice",
+        PollType.Text or PollType.Number => "Your answer",
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
     };
+
+    /// <summary>The summary's heading: the question type's in a simple poll, else "Your answers".</summary>
+    public static string HeadingFor(PollDefinition def) => VoteLayout.IsSimple(def) ? HeadingFor(def.Questions[0].Type) : "Your answers";
 }

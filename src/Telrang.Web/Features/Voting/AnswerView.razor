@@ -1,0 +1,112 @@
+@using Telrang.Core.Ballots
+@* Read-only view of one question's answer in one of the visitor's own responses (DESIGN.md §34.3): ranking and bans,
+   points, availability (the dates list view), the picked options, the number or the voter's own text. Free text is
+   plain text in <bdi>, never Markdown. *@
+@switch (Question.Type)
+{
+    case PollType.Ranked:
+        var r = Answer?.Ranked ?? new RankedBallot([], []);
+        @if (r.Ranked.Count == 0)
+        {
+            <p class="text-secondary mb-2">Nothing ranked.</p>
+        }
+        else
+        {
+            <ol class="list-group list-group-numbered mb-2">
+                @foreach (var key in r.Ranked)
+                {
+                    <li class="list-group-item" @key="key">@Label(key)</li>
+                }
+            </ol>
+        }
+        @if (r.Banned.Count > 0)
+        {
+            <p class="small mb-2"><span class="fw-semibold">Banned:</span> @string.Join(", ", r.Banned.Select(Label))</p>
+        }
+        break;
+    case PollType.Points:
+        var p = Answer?.Points ?? new PointsBallot(new Dictionary<string, int>());
+        var given = Question.Options.Where(o => p.Points.GetValueOrDefault(o.Key) > 0).ToList();
+        @if (given.Count == 0)
+        {
+            <p class="text-secondary mb-2">No points given.</p>
+        }
+        else
+        {
+            <ul class="list-group mb-2">
+                @foreach (var o in given)
+                {
+                    <li class="list-group-item d-flex justify-content-between gap-2" @key="o.Key">
+                        <span class="text-break">@o.Label</span>
+                        <span class="fw-semibold text-nowrap">@p.Points[o.Key] @(p.Points[o.Key] == 1 ? "point" : "points")</span>
+                    </li>
+                }
+            </ul>
+        }
+        <p class="small mb-2">@p.Points.Values.Sum() of @(Question.Budget ?? 0) points used.</p>
+        break;
+    case PollType.Dates:
+        var dts = Answer?.Dates ?? new DatesBallot(new Dictionary<string, Availability>());
+        <ul class="list-group mb-2 dates-ballot">
+            @foreach (var o in Question.Options)
+            {
+                <li class="list-group-item dates-list-row" @key="o.Key">
+                    <span class="dates-list-text text-break">@DatesFormat.LongLabel(o)</span>
+                    <span class="dates-list-cell">
+                        <DatesCell Option="o" View="DatesView.List" ReadOnly="true" AllowMaybe="Question.Maybe"
+                                   Value="@dts.Answers.GetValueOrDefault(o.Key, Availability.No)" />
+                    </span>
+                </li>
+            }
+        </ul>
+        break;
+    case PollType.Choice:
+        var c = Answer?.Choice ?? new ChoiceBallot([]);
+        @if (c.Keys.Count == 0 && !c.Other)
+        {
+            <p class="text-secondary mb-2">No answer.</p>
+        }
+        else
+        {
+            <ul class="list-group mb-2 choice-ballot">
+                @foreach (var o in Question.Options.Where(o => c.Keys.Contains(o.Key)))
+                {
+                    <li class="list-group-item text-break" @key="o.Key">@o.Label</li>
+                }
+                @if (c.Other)
+                {
+                    <li class="list-group-item text-break"><span class="fw-semibold">Other:</span> <bdi class="free-text">@Answer?.OtherText</bdi></li>
+                }
+            </ul>
+        }
+        break;
+    case PollType.Text:
+        @if (Answer?.Text is { } text)
+        {
+            <p class="mb-2 text-break free-text"><bdi>@text</bdi></p>
+        }
+        else
+        {
+            <p class="text-secondary mb-2">No answer.</p>
+        }
+        break;
+    case PollType.Number:
+        @if (Answer?.Number is { } n)
+        {
+            <p class="mb-2 fw-semibold">@n.ToInvariantString()@(Question.Unit.Length > 0 ? " " + Question.Unit : "")</p>
+        }
+        else
+        {
+            <p class="text-secondary mb-2">No answer.</p>
+        }
+        break;
+    default:
+        throw new InvalidOperationException($"Unknown question type {Question.Type}.");
+}
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter] public QuestionAnswer? Answer { get; set; }
+
+    private string Label(string key) => Question.Options.FirstOrDefault(o => o.Key == key)?.Label ?? key;
+}

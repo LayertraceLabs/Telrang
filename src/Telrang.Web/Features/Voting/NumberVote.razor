@@ -1,0 +1,20 @@
+@* Number question field inside the static vote form (DESIGN.md §34.3): a number field with the question's bounds and
+   unit. The server parses it invariant and refuses more decimals than allowed (never rounds). *@
+<div class="input-group number-answer">
+    <input type="number" class="form-control" id="@Values.Id("number")" name="@Values.FieldName(BallotForm.NumberField)" inputmode="decimal"
+           step="@Step" min="@Bound(Question.Min)" max="@Bound(Question.Max)" aria-label="@Label" value="@Values.NumberText" />
+    @if (Question.Unit.Length > 0)
+    {
+        <span class="input-group-text">@Question.Unit</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public BallotForm Values { get; set; } = default!;
+    [Parameter] public string Label { get; set; } = "";
+
+    private string Step => Question.Decimals == 0 ? "1" : "any";
+
+    private static string? Bound(decimal? v) => v is { } d ? new Telrang.Core.Ballots.NumberBallot(d).ToInvariantString() : null;
+}

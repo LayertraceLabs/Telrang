@@ -8,13 +8,14 @@ namespace Telrang.Web.Security;
 /// <summary>
 /// Request body and form limits for every request (DESIGN.md §31). Kestrel refuses a body over
 /// <see cref="MaxBodyBytes"/> (Program.cs) and the form options below apply to every form; endpoints may set tighter
-/// ones (the vote page, <c>VoteFormLimits</c>). The largest legitimate HTTP form is the vote form (64 kB); passkey
+/// ones, or for the vote page's carry field (DESIGN.md §34.4) a longer value (<c>VoteFormLimits</c>). The largest legitimate
+/// HTTP form is the vote form (a page's 64 kB plus the carry field, about 220 kB); passkey
 /// credentials are a few kB. Editor saves, branding uploads and the admin's other changes travel over the Blazor circuit,
 /// whose long-polling fallback posts circuit messages, so <c>/_blazor</c> gets <see cref="HubBodyBytes"/> instead.
 /// </summary>
 public static class RequestLimits
 {
-    /// <summary>Largest request body outside the Blazor hub: four times the vote form's limit.</summary>
+    /// <summary>Largest request body outside the Blazor hub: above the vote form's limit (<c>VoteFormLimits.MaxBodyBytes</c>).</summary>
     public const int MaxBodyBytes = 256 * 1024;
 
     /// <summary>Most values in one form (the account forms send about ten).</summary>

@@ -1,0 +1,22 @@
+@* Text question field inside the static vote form (DESIGN.md §34.3): one line or a box. The answer is free text, kept
+   apart from the scored ballot and encrypted; the voter sees their own text, other voters never do. *@
+@if (Question.Multiline)
+{
+    <textarea class="form-control text-answer" id="@Values.Id("text")" name="@Values.FieldName(BallotForm.TextField)" rows="5"
+              maxlength="@Max" aria-label="@Label">@Values.Text</textarea>
+}
+else
+{
+    <input type="text" class="form-control text-answer" id="@Values.Id("text")" name="@Values.FieldName(BallotForm.TextField)"
+           maxlength="@Max" aria-label="@Label" value="@Values.Text" />
+}
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public BallotForm Values { get; set; } = default!;
+    [Parameter] public string Label { get; set; } = "";
+    /// <summary>The admin's limit for one text answer (a question made before it changed keeps its own maximum).</summary>
+    [Parameter] public int TextMax { get; set; } = PollLimits.Default.TextAnswerMax;
+
+    private int Max => Question.MaxLength ?? TextMax;
+}
