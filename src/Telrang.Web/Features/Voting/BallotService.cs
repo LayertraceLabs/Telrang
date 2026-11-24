@@ -478,6 +478,7 @@ public sealed class BallotService(
             PollType.Ranked => new MyBallot(row.ResponseNo, PollJson.ReadRanked(row.PayloadJson, q), null, row.DisplayName, row.SubmittedAt, row.UpdatedAt),
             PollType.Points => new MyBallot(row.ResponseNo, null, PollJson.ReadPoints(row.PayloadJson, q), row.DisplayName, row.SubmittedAt, row.UpdatedAt),
             PollType.Dates => new MyBallot(row.ResponseNo, null, null, row.DisplayName, row.SubmittedAt, row.UpdatedAt) { Dates = PollJson.ReadDates(row.PayloadJson, q) },
+            PollType.Choice or PollType.Text or PollType.Number => throw new NotSupportedException(), // §34 step 2
             _ => throw new ArgumentOutOfRangeException(nameof(q), q.Type, null),
         };
         return ballot with { NotifyOnClose = row.NotifyOnClose };

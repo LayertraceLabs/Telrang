@@ -122,6 +122,10 @@ public static class PollJson
                 case PollType.Dates:
                     foreach (var (k, v) in DeserializeDates(json, q.Key).Answers) if (v is Availability.Yes or Availability.Maybe) seen.Add(k);
                     break;
+                case PollType.Choice:
+                case PollType.Text:
+                case PollType.Number:
+                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
                 default:
                     throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
             }

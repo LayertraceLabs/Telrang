@@ -106,6 +106,10 @@ public sealed class CsvExportService(IDbContextFactory<ApplicationDbContext> dbF
                     cells = def.Questions[0].Options.Select(o => AvailabilityWord(ballot.Answers.GetValueOrDefault(o.Key, Availability.No)));
                     break;
                 }
+                case PollType.Choice:
+                case PollType.Text:
+                case PollType.Number:
+                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
                 default:
                     throw new ArgumentOutOfRangeException(nameof(encodedId), def.Questions[0].Type, null);
             }

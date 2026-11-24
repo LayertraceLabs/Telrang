@@ -11,6 +11,9 @@ public static class PollText
         PollType.Ranked => "Ranked",
         PollType.Points => "Points",
         PollType.Dates => "Dates",
+        PollType.Choice => "Choice",
+        PollType.Text => "Text",
+        PollType.Number => "Number",
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
     };
 
