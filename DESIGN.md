@@ -3158,3 +3158,77 @@ circuit. Results cost grows with the scored payload only, never with free text.
   limits per image, per user count and per user total, served only inside the poll's pages (`CanView`,
   `Cross-Origin-Resource-Policy: same-origin`, cross-site and direct requests refused), deleted with the poll, an admin
   review tab, and a notice at upload that admins can see the image. Depends on §34.8.
+
+### 34.13 Implemented (2026-11-24): details the spec left open
+All seven steps of §34.10 are in (migrations `MultiQuestionVoting`, `QuestionChangeLog`, `PollLooks`, `Reports`, each in
+both sets). Choices made on the way:
+
+**Model and validation**
+- Definitions stored before 0.4 read unchanged: no prompt, not required, no pages; an empty ranked, points or dates
+  ballot is still accepted. Counters of 0 read as the highest `q`/`p`/`g` number among the stored keys.
+- "Required" is one of a question's rules and fixed at creation, like its type. Choice: min and max selections are
+  fixed, Other counts as one selection, the minimum applies only to an answered question.
+- Numbers: bounds and answers within ±10^15 (sums and means cannot overflow); only sign, digits and a point are parsed.
+  The histogram spans the answers given, 10 buckets, one per value for a small whole-number range.
+- Text lengths are UTF-16 counts of the trimmed text; an empty maximum becomes the admin limit at creation.
+- Choice results keep the option order; shares are of the respondents who answered the question.
+
+**Voting**
+- A carry field exists only for polls with two or more pages; a structured poll with one page submits directly. The
+  page the posted fields belong to comes from the carry field, never from a form field. An answered Text question
+  leaves an empty part in the scored payload (`{"q4": {}}`), so "N answers" needs no decryption.
+- Carry purpose `Telrang.VoteCarry.v1` + poll id + voter identity + response number (0 = a new response); a field
+  issued more than 5 minutes in the future is refused too. `TextCipher` and drafts have their own purposes, bound to
+  the poll (drafts also to account and response).
+- Draft resume: `/p/{id}` shows "Draft · saved <time>" with Continue and Discard; fields appear after Continue.
+  Closing a poll (owner, admin or the sweep) deletes its drafts; reopening does not restore them.
+- The new inputs carry `required`, `min`/`max`/`step`, `minlength`/`maxlength` where they match the server's rules.
+
+**Results**
+- One pass scores every question; the summary never selects `TextCipher` (a test counts decrypts and inspects the
+  SQL). Free text is read in three owner-only places: the paged text list (`?texts=q4`), the ballots table, the CSV.
+  An admin who is not the owner is a voter here.
+- Structured polls: ballots view and ballots CSV are one row per response and one column per question; the results CSV
+  is one long table `Question,Option,Measure,Value` with counts only. Simple ranked, points and dates polls keep their
+  layouts and CSV columns byte for byte.
+- The account data export holds the account's own text answers and drafts, decrypted.
+
+**Editor**
+- Title and description sit above the tabs; closing is in "Voting and results". The simple editor hides the question
+  text (the title is the question); the first Add question / group / page copies the title into it.
+- A new page or group comes with one new Choice question. Questions move with up/down buttons across group and page
+  boundaries; an emptied group is removed, an emptied page shows the validator's error. Removing a page moves its
+  questions to the page before it.
+- Change log lines: "Question “X” added", "Question “X” removed (answered on N ballots)", "Question “A” renamed to “B”";
+  option entries in a structured poll are prefixed with the question ("Diet: “Pizza” removed …").
+- Lists, the share page and the close mail show the type of a simple poll and "2 pages · 5 questions" otherwise.
+- The limits of §34.5 are admin settings beside the existing poll limits.
+
+**Looks**
+- `ThemeLook` (four colours, a `ThemeFont`, radius 0–16 px) with one validator (`ThemeLook.Create`) and one writer
+  (`ThemeCss.WriteLook`) serves the instance theme and poll looks; `theme.css` is pinned byte for byte by a test.
+- `look.css` is `private, immutable` when `v` is the current hash, else `no-cache`; 404 for unknown or unviewable polls,
+  polls without a look, and when "Poll looks" is off (stored looks are kept and return when it is switched on).
+- The live preview uses `/looks/preview.css?c=<look code>` (signed-in only), the same tokens scoped to the preview
+  panels: the only way to preview without inline styles.
+- 20 saved looks per account, a constant. `DefaultLookId` has no foreign key (it would rebuild the users table on
+  SQLite); deleting the look clears it. The look is not part of the browser draft.
+
+**Reports and take-down**
+- The report page is static, on `PublicLayout` and the `?admin=1` stylesheet, never with the poll's look: a complaint
+  channel must stay usable whatever the styling does. The link is hidden from the poll's owner.
+- Limits: 3 reports per minute per client key (an abuse signal beyond), 20 open reports per poll and 1 000 in all;
+  beyond the caps a report is accepted to the visitor but not stored, and the answer never says which.
+- States: disabling marks a poll's open reports acted, enabling reopens them, dismissing works per poll and erases text
+  and contact. Disable and Enable are also on the Polls tab.
+- A disabled poll answers 410 on every `/p/{id}` route (vote, results, live stream, `look.css`, report). Admins see it
+  read-only as a visitor would see an enabled poll, without the CSV. The owner cannot edit, reopen or add invite links
+  ("Disabled by an admin."), and can still close, export and delete it.
+- Mails: admins get at most one mail an hour about new reports; the owner's mail about a disabled poll holds nothing
+  from any report.
+
+**Not built, known gaps**
+- No "move to page" control for questions (step buttons only).
+- The simple ranked, points and dates preview still lists options instead of using the vote widgets.
+- Browser flows do not cover the dates calendar inside a structured poll, or restoring a structured browser draft on
+  the edit page.
