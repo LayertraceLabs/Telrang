@@ -42,6 +42,12 @@ public class Poll
     /// </summary>
     public DateTimeOffset? ClosedNotifiedAt { get; set; }
 
+    /// <summary>Questions in the definition (DESIGN.md §34.1), written on save, for lists ("4 pages · 9 questions"); 1 for every poll before §34.</summary>
+    public int QuestionCount { get; set; } = 1;
+
+    /// <summary>Pages in the definition, at least 1 (a definition without pages is one implicit page); written on save.</summary>
+    public int PageCount { get; set; } = 1;
+
     public List<Ballot> Ballots { get; set; } = [];
     public List<InviteToken> InviteTokens { get; set; } = [];
     public List<PollChange> Changes { get; set; } = [];
@@ -99,8 +105,18 @@ public class Ballot
     public DateTimeOffset SubmittedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
-    /// <summary>Serialized RankedBallot or PointsBallot (see BallotJson).</summary>
+    /// <summary>
+    /// The scored parts of the response, one per answered question (<c>PollJson</c>): keys, ranks, points, availability,
+    /// numbers, the Other flag. Never free text (DESIGN.md §34.3).
+    /// </summary>
     public required string PayloadJson { get; set; }
+
+    /// <summary>
+    /// All free text of the response (text answers, "Other" texts) as one JSON object, compressed when that is smaller and
+    /// encrypted (<c>ResponseTextProtection</c>, DESIGN.md §34.3); null when the response has none. Owner-only: only the
+    /// voter's own view, and later the owner's text view, ballots view and CSV, read it. Nothing that computes results selects it.
+    /// </summary>
+    public string? TextCipher { get; set; }
 
     /// <summary>
     /// "Email me when this poll closes": only ever true on account ballots of a verified address, set by
@@ -110,6 +126,22 @@ public class Ballot
 
     public static string IdentityForUser(string userId) => UserIdentityPrefix + userId;
     public static string IdentityForKey(string voterKey) => KeyIdentityPrefix + voterKey;
+}
+
+/// <summary>
+/// The unfinished answers of a voter identified by account (DESIGN.md §34.4): the carry field's content, kept on every Next
+/// so the voter can resume on another visit. Not a ballot: in no count, result, list, CSV or mail, and never shown to the
+/// owner. One per poll, account and response (<see cref="ResponseNo"/> 0 = a new response). Deleted on Submit, on Discard,
+/// when the poll closes (sweep) or is deleted, and with the account. <see cref="Cipher"/> is encrypted whole.
+/// </summary>
+public class ResponseDraft
+{
+    public Guid PollId { get; set; }
+    public Poll? Poll { get; set; }
+    public required string UserId { get; set; }
+    public int ResponseNo { get; set; }
+    public required string Cipher { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 /// <summary>Single-person invite link. Only the SHA-256 of the token is stored.</summary>

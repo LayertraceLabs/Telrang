@@ -243,6 +243,7 @@ builder.Services.AddScoped<PollAccessService>();
 builder.Services.AddScoped<PollService>();
 builder.Services.AddScoped<BallotService>();
 builder.Services.AddSingleton<VoteFormIds>(); // single-use vote form ids (DESIGN.md §21.1), memory only
+builder.Services.AddSingleton<ResponseTextProtection>(); // free text and drafts at rest (DESIGN.md §34.3)
 builder.Services.AddSingleton<Telrang.Web.Features.Showcase.ShowcaseCache>(); // the home page examples, rendered once a day (DESIGN.md §31)
 builder.Services.AddSingleton<ResultsCache>(); // computed results per poll, dropped on change (DESIGN.md §31)
 builder.Services.AddScoped<ResultsService>();

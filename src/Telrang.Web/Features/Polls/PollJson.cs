@@ -58,9 +58,73 @@ public static class PollJson
     public static string Serialize(string questionKey, RankedBallot ballot) => Part(questionKey, ballot);
     public static string Serialize(string questionKey, PointsBallot ballot) => Part(questionKey, ballot);
     public static string Serialize(string questionKey, DatesBallot ballot) => Part(questionKey, ballot);
+    public static string Serialize(string questionKey, ChoiceBallot ballot) => new JsonObject { [questionKey] = ChoiceNode(ballot) }.ToJsonString(Options);
+    public static string Serialize(string questionKey, NumberBallot ballot) => new JsonObject { [questionKey] = NumberNode(ballot) }.ToJsonString(Options);
 
     private static string Part<T>(string questionKey, T ballot) =>
         new JsonObject { [questionKey] = JsonSerializer.SerializeToNode(ballot, Options) }.ToJsonString(Options);
+
+    /// <summary>
+    /// A payload of several questions (DESIGN.md §34.3): <c>{"q1": {...}, "q2": {...}}</c>, one part per answered question in
+    /// the order given. A question without a part is not answered.
+    /// </summary>
+    public static string SerializeParts(IEnumerable<KeyValuePair<string, JsonNode>> parts)
+    {
+        var o = new JsonObject();
+        foreach (var (key, node) in parts) o[key] = node;
+        return o.ToJsonString(Options);
+    }
+
+    public static JsonNode RankedNode(RankedBallot b) => JsonSerializer.SerializeToNode(b, Options)!;
+    public static JsonNode PointsNode(PointsBallot b) => JsonSerializer.SerializeToNode(b, Options)!;
+    public static JsonNode DatesNode(DatesBallot b) => JsonSerializer.SerializeToNode(b, Options)!;
+
+    /// <summary>Choice: <c>{"keys": [...]}</c>, plus <c>"other": true</c> when Other was picked (its text is stored apart).</summary>
+    public static JsonNode ChoiceNode(ChoiceBallot b)
+    {
+        var o = new JsonObject { ["keys"] = new JsonArray(b.Keys.Select(k => (JsonNode?)JsonValue.Create(k)).ToArray()) };
+        if (b.Other) o["other"] = true;
+        return o;
+    }
+
+    /// <summary>Number: <c>{"value": "12.5"}</c>, the decimal as an invariant string (never a JSON number, so nothing rounds it).</summary>
+    public static JsonNode NumberNode(NumberBallot b) => new JsonObject { ["value"] = b.ToInvariantString() };
+
+    /// <summary>Text: the part says "answered" and nothing else; the text itself is free text, stored apart (<c>Ballot.TextCipher</c>).</summary>
+    public static JsonNode TextNode() => new JsonObject();
+
+    /// <summary>The question has a part in the payload (answered; for a text question the only thing the payload says).</summary>
+    public static bool HasPart(string json, string questionKey)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty(questionKey, out var part)
+               && part.ValueKind == JsonValueKind.Object;
+    }
+
+    /// <summary>A choice part: the keys (strings only) and the Other flag; a missing part is an empty ballot.</summary>
+    public static ChoiceBallot DeserializeChoice(string json, string questionKey)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty(questionKey, out var part)
+            || part.ValueKind != JsonValueKind.Object) return new ChoiceBallot([]);
+        var keys = new List<string>();
+        if (part.TryGetProperty("keys", out var k) && k.ValueKind == JsonValueKind.Array)
+            foreach (var e in k.EnumerateArray())
+                if (e.ValueKind == JsonValueKind.String) keys.Add(e.GetString()!);
+        var other = part.TryGetProperty("other", out var x) && x.ValueKind == JsonValueKind.True;
+        return new ChoiceBallot(keys, other);
+    }
+
+    /// <summary>A number part, or null when missing or not a decimal string (read invariant, never rounded).</summary>
+    public static NumberBallot? DeserializeNumber(string json, string questionKey)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty(questionKey, out var part)
+            || part.ValueKind != JsonValueKind.Object || !part.TryGetProperty("value", out var v) || v.ValueKind != JsonValueKind.String)
+            return null;
+        return decimal.TryParse(v.GetString(), System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
+            System.Globalization.CultureInfo.InvariantCulture, out var d) ? new NumberBallot(d) : null;
+    }
 
     public static RankedBallot DeserializeRanked(string json, string questionKey) =>
         Read<RankedBallot>(json, questionKey) ?? new RankedBallot([], []);
@@ -94,9 +158,18 @@ public static class PollJson
     public static DatesBallot ReadDates(string json, PollQuestion q, KnownKeys? known = null) =>
         (known ?? BallotFilter.For(q)).Filter(DeserializeDates(json, q.Key));
 
+    /// <summary>A choice part with removed options dropped; the Other flag only while the question offers Other.</summary>
+    public static ChoiceBallot ReadChoice(string json, PollQuestion q, KnownKeys? known = null)
+    {
+        var b = (known ?? BallotFilter.For(q)).Filter(DeserializeChoice(json, q.Key));
+        return b.Other && !q.AllowOther ? b with { Other = false } : b;
+    }
+
+    public static NumberBallot? ReadNumber(string json, PollQuestion q) => DeserializeNumber(json, q.Key);
+
     /// <summary>
     /// Per key of <paramref name="keys"/>: how many stored payloads answered it (ranked or banned, points above 0, yes or
-    /// maybe): the ballot counts of removals in the change log and the editor's preview. One parse per payload, whatever
+    /// maybe, picked): the ballot counts of removals in the change log and the editor's preview. One parse per payload, whatever
     /// the number of keys (DESIGN.md §31, pentest R3-VOTE-3 / R3-RES-5).
     /// </summary>
     public static Dictionary<string, int> AnswerCounts(IEnumerable<string> payloads, PollQuestion q, IEnumerable<string> keys)
@@ -123,9 +196,11 @@ public static class PollJson
                     foreach (var (k, v) in DeserializeDates(json, q.Key).Answers) if (v is Availability.Yes or Availability.Maybe) seen.Add(k);
                     break;
                 case PollType.Choice:
+                    foreach (var k in DeserializeChoice(json, q.Key).Keys) seen.Add(k);
+                    break;
                 case PollType.Text:
                 case PollType.Number:
-                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
+                    break; // no options
                 default:
                     throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
             }

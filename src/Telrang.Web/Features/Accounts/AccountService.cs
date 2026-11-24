@@ -532,6 +532,7 @@ public sealed class AccountService(
         var pollIds = await db.Polls.Where(p => p.OwnerId == user.Id).Select(p => p.Id).ToListAsync(ct);
         await PollService.DeleteCascadeAsync(db, pollIds, ct);
         await db.SetupLinks.Where(l => l.UserId == user.Id).ExecuteDeleteAsync(ct);
+        await db.ResponseDrafts.Where(d => d.UserId == user.Id).ExecuteDeleteAsync(ct); // unfinished answers (DESIGN.md §34.4)
 
         await RemovePasskeysAsync(user);
         foreach (var login in await users.GetLoginsAsync(user)) await users.RemoveLoginAsync(user, login.LoginProvider, login.ProviderKey);

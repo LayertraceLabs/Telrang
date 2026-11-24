@@ -86,6 +86,7 @@ public sealed class PollSweepService(
         await running.WaitAsync(ct);
         try
         {
+            await DeleteClosedDraftsAsync(ct);
             await NotifyClosedAsync(ct);
             var now = time.GetUtcNow();
             if (lastRetention is null || now - lastRetention >= RetentionInterval)
@@ -100,6 +101,23 @@ public sealed class PollSweepService(
         {
             running.Release();
         }
+    }
+
+    /// <summary>
+    /// Every pass: deletes the drafts of polls that are closed (DESIGN.md §34.4), whether the owner closed them (that path
+    /// deletes them at once too) or their close date passed. Returns how many.
+    /// </summary>
+    public async Task<int> DeleteClosedDraftsAsync(CancellationToken ct = default)
+    {
+        var now = time.GetUtcNow();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var withDrafts = await db.ResponseDrafts.Select(d => d.PollId).Distinct().ToListAsync(ct);
+        if (withDrafts.Count == 0) return 0;
+        // The close instants are compared in memory (SQLite cannot compare DateTimeOffset columns).
+        var closed = (await db.Polls.AsNoTracking().Where(p => withDrafts.Contains(p.Id) && (p.ClosedAt != null || p.ClosesAt != null))
+                .Select(p => new { p.Id, p.ClosedAt, p.ClosesAt }).ToListAsync(ct))
+            .Where(p => PollState.IsClosed(p.ClosedAt, p.ClosesAt, now)).Select(p => p.Id).ToList();
+        return closed.Count == 0 ? 0 : await PollService.DeleteDraftsAsync(db, closed, ct);
     }
 
     /// <summary>Daily: self-registered accounts still unverified after 7 days are deleted (pentest AV-10, AccountService).</summary>

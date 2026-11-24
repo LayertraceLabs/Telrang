@@ -461,6 +461,7 @@ public sealed class PollService(
         // ClosedNotifiedAt stays: the next close is mailed at most once a day (PollSweepService.NotifyDue, R2-POLLS-3).
         a.Poll.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
+        if (closed) await DeleteDraftsAsync(db, [a.Poll.Id], ct);
         notifier.Changed(a.Poll.Id);
         return (true, null);
     }
@@ -622,11 +623,19 @@ public sealed class PollService(
     public static async Task<int> DeleteCascadeAsync(ApplicationDbContext db, IReadOnlyCollection<Guid> pollIds, CancellationToken ct)
     {
         if (pollIds.Count == 0) return 0;
+        await DeleteDraftsAsync(db, pollIds, ct);
         await db.PollChanges.Where(c => pollIds.Contains(c.PollId)).ExecuteDeleteAsync(ct);
         await db.InviteTokens.Where(t => pollIds.Contains(t.PollId)).ExecuteDeleteAsync(ct);
         await db.Ballots.Where(b => pollIds.Contains(b.PollId)).ExecuteDeleteAsync(ct);
         return await db.Polls.Where(p => pollIds.Contains(p.Id)).ExecuteDeleteAsync(ct);
     }
+
+    /// <summary>
+    /// Deletes the voters' drafts of these polls (DESIGN.md §34.4: when a poll closes or is deleted). Drafts of a closed poll
+    /// are useless anyway (nobody can vote); the sweep also deletes those of polls that closed by their date.
+    /// </summary>
+    public static Task<int> DeleteDraftsAsync(ApplicationDbContext db, IReadOnlyCollection<Guid> pollIds, CancellationToken ct) =>
+        db.ResponseDrafts.Where(d => pollIds.Contains(d.PollId)).ExecuteDeleteAsync(ct);
 
     /// <summary>The owner changed the close date: added, removed or moved (or, for definitions before §26, its time zone).</summary>
     public static bool CloseDateChanged(PollDefinition stored, PollDefinition updated) =>
@@ -650,6 +659,8 @@ public sealed class PollService(
         poll.DefinitionJson = PollJson.Serialize(def);
         poll.Title = def.Title.Length > 500 ? def.Title[..500] : def.Title;
         poll.Type = def.Questions[0].Type;
+        poll.QuestionCount = def.Questions.Count;
+        poll.PageCount = Math.Max(1, def.Pages.Count);
         poll.Scoring = def.Questions[0].Scoring;
         poll.ResultsVisibility = def.Results;
         poll.VoterMode = def.Voters;
