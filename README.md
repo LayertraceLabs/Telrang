@@ -55,6 +55,13 @@ Measured on one machine and scaled to a 3 GHz server core. Details, method and c
 | Many votes at once (>50/s) | 4 cores + 2 for PostgreSQL | 2 GB + 1 GB | 20 GB SSD |
 | ~1,000,000 accounts or ballots | 4–8 cores | 4–8 GB | 20 GB NVMe (see the limits in PERFORMANCE.md) |
 
+## How Telrang is built
+
+Most of the code is written with AI coding assistants (Claude Code), working from a design that is decided and
+reviewed by the maintainer ([DESIGN.md](DESIGN.md)). Every change must pass the unit and integration tests on SQLite
+and PostgreSQL, the browser smoke tests and CI; security-relevant parts go through separate review and pentest rounds.
+Report problems via [SECURITY.md](SECURITY.md) or an issue.
+
 ## Development
 
 ```sh
