@@ -222,58 +222,10 @@
                 }
             </select>
         </div>
-        <div class="col-12 col-sm-6 col-lg-4 option-field">
-            <label for="theme-font" class="form-label">Font</label>
-            <OptionHelp Label="Font">
-                <p>One of four font lists that use fonts already installed on the visitor's device (System UI is the default);
-                    no web font is downloaded, so no font service sees your visitors.</p>
-            </OptionHelp>
-            <select id="theme-font" class="form-select" @bind="font">
-                @foreach (var f in ThemeSettings.Fonts)
-                {
-                    <option value="@f.Value">@f.Label</option>
-                }
-            </select>
+        <div class="col-12">
+            @* Font and colours: the controls a poll look uses too (DESIGN.md §34.6); the instance's radius stays fixed. *@
+            <LookFields Form="look" Instance="true" Prefix="theme" />
         </div>
-        <fieldset class="col-12">
-            <legend class="visually-hidden">Colours</legend>
-            <div class="option-field">
-                <span class="form-label fs-6" aria-hidden="true">Colours</span>
-                <OptionHelp Id="theme-colours" Label="Colours">
-                    <p>Every colour of the site is derived from two per mode, base and highlight, with text contrast raised
-                        until it meets WCAG AA. The base carries buttons, links, the brand mark, result bars, the active
-                        navigation item and the Sidebar layout; the highlight is used sparingly: the band on top of the header,
-                        focus rings, the first-place badge and the leading result bar.</p>
-                    <p>The built-in colours are Teal / Coral in both modes. A colour set here replaces the built-in one for
-                        that mode only; <em>Reset</em> next to it returns to the built-in colour. The base's lightness is
-                        adjusted per mode so that text on it stays readable. Applies to every page, admin pages included.</p>
-                </OptionHelp>
-                <div class="theme-colours">
-                    @foreach (var (key, label, builtIn) in ThemeSettings.ColourKeys)
-                    {
-                        var id = "theme-" + key[(key.IndexOf('.') + 1)..].ToLowerInvariant();
-                        var value = colours[key];
-                        var overridden = !Same(value, builtIn);
-                        <div class="theme-colour" @key="key">
-                            <label for="@id" class="form-label mb-1" data-help="theme-colours">@label</label>
-                            <div class="d-flex align-items-center gap-2">
-                                <input id="@id" type="color" class="form-control form-control-color theme-swatch" value="@value"
-                                       @onchange="e => colours[key] = e.Value?.ToString() ?? builtIn" />
-                                <span class="font-monospace small">@value</span>
-                                @if (overridden)
-                                {
-                                    <button type="button" class="btn btn-link btn-sm p-0" aria-label="@($"Reset {label}")" @onclick="() => colours[key] = builtIn">Reset</button>
-                                }
-                                else
-                                {
-                                    <span class="small text-body-secondary">built-in</span>
-                                }
-                            </div>
-                        </div>
-                    }
-                </div>
-            </div>
-        </fieldset>
         <div class="col-12 col-sm-6 option-field">
             <label for="theme-size" class="form-label">Font size: @fontSize px</label>
             <OptionHelp Label="Font size">
@@ -379,9 +331,8 @@ else
     private string? retentionDays;
     private string layout = "topbar";
     private string preset = "system";
-    private string font = "system-ui";
-    /// <summary>The four colour fields by setting key: the override, else the built-in colour.</summary>
-    private Dictionary<string, string> colours = ThemeSettings.ColourKeys.ToDictionary(c => c.Key, c => c.BuiltIn);
+    /// <summary>Font and the four colours (the override, else the built-in colour), in the shared look controls.</summary>
+    private LookForm look = new();
     private int fontSize = ThemeSettings.DefaultFontSize;
     private bool backgroundEnabled;
     private int overlay = ThemeSettings.DefaultOverlay;
@@ -406,8 +357,8 @@ else
         retentionDays = s.RetentionDays > 0 ? s.RetentionDays.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
         var t = s.Theme;
         layout = t.LayoutValue;
-        colours = ThemeSettings.ColourKeys.ToDictionary(c => c.Key, c => t.Override(c.Key) ?? c.BuiltIn);
-        (preset, font, fontSize) = (t.PresetValue, t.FontValue, t.FontSize);
+        look = LookForm.From(t.Look);
+        (preset, fontSize) = (t.PresetValue, t.FontSize);
         (backgroundEnabled, overlay, customCss) = (t.BackgroundEnabled, t.BackgroundOverlay, t.CustomCss);
     }
 
@@ -415,8 +366,12 @@ else
     private Dictionary<string, string?> ThemeValues()
     {
         var values = ThemeFieldValues();
-        foreach (var (key, _, builtIn) in ThemeSettings.ColourKeys)
-            values[key] = Same(colours[key], builtIn) || !ThemeSettings.IsHex(colours[key]) ? null : colours[key].Trim().ToLowerInvariant();
+        for (var i = 0; i < ThemeSettings.ColourKeys.Count; i++)
+        {
+            var (key, _, builtIn) = ThemeSettings.ColourKeys[i];
+            var colour = look.Colour(i);
+            values[key] = Same(colour, builtIn) || !ThemeSettings.IsHex(colour) ? null : colour.Trim().ToLowerInvariant();
+        }
         foreach (var legacy in LegacyKeys) values[legacy] = null;
         return values;
     }
@@ -428,7 +383,7 @@ else
     {
         [SettingKeys.ThemeLayout] = layout == ThemeSettings.Default.LayoutValue ? null : layout,
         [SettingKeys.ThemePreset] = preset == "system" ? null : preset,
-        [SettingKeys.ThemeFontStack] = font == ThemeSettings.Default.FontValue ? null : font,
+        [SettingKeys.ThemeFontStack] = look.Font == ThemeSettings.Default.FontValue ? null : look.Font,
         [SettingKeys.ThemeFontSize] = fontSize == ThemeSettings.DefaultFontSize ? null : fontSize.ToString(System.Globalization.CultureInfo.InvariantCulture),
         [SettingKeys.ThemeBackgroundEnabled] = backgroundEnabled ? "true" : null,
         [SettingKeys.ThemeBackgroundOverlay] = overlay == ThemeSettings.DefaultOverlay ? null : overlay.ToString(System.Globalization.CultureInfo.InvariantCulture),
