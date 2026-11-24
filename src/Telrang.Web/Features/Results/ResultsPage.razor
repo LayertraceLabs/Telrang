@@ -107,6 +107,10 @@
                 case PollType.Dates:
                     <DatesGridView Definition="d" Rows="t.Dates!" Window="t.Window" BaseHref="@BallotsHref" />
                     break;
+                case PollType.Choice:
+                case PollType.Text:
+                case PollType.Number:
+                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
                 default:
                     throw new InvalidOperationException($"No ballots view for poll type {d.Questions[0].Type}.");
             }
@@ -124,6 +128,10 @@
                 case PollType.Dates when r.Dates is not null:
                     <DatesResultsView Definition="d" Results="r.Dates" />
                     break;
+                case PollType.Choice:
+                case PollType.Text:
+                case PollType.Number:
+                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
                 default:
                     throw new InvalidOperationException($"No results for poll type {d.Questions[0].Type}.");
             }

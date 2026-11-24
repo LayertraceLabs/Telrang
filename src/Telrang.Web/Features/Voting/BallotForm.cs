@@ -61,6 +61,10 @@ public sealed class BallotForm
                 foreach (var (k, a) in ballot?.Dates?.Answers ?? new Dictionary<string, Availability>())
                     if (keys.Contains(k) && (a != Availability.Maybe || q.Maybe)) f.Answers[k] = a;
                 break;
+            case PollType.Choice:
+            case PollType.Text:
+            case PollType.Number:
+                throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
             default:
                 throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
         }
@@ -94,6 +98,10 @@ public sealed class BallotForm
                     var a = raw switch { "yes" => Availability.Yes, "maybe" => Availability.Maybe, _ => Availability.No };
                     if (a != Availability.No) f.Answers[o.Key] = a;
                     break;
+                case PollType.Choice:
+                case PollType.Text:
+                case PollType.Number:
+                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 2
                 default:
                     throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
             }

@@ -32,6 +32,13 @@ public static class PollParsing
         var today = DateOnly.FromDateTime((createdAt ?? DateTimeOffset.UtcNow).UtcDateTime);
         var result = PollDraftValidator.Validate(draft, limits, existing, today);
         var extra = new List<DraftError>();
+        // §34 step 2: lift when the vote page and editor support it
+        if (draft.Questions is { Count: > 1 }) extra.Add(new DraftError("questions", "A poll has one question."));
+        if (draft.Pages is { Count: > 0 }) extra.Add(new DraftError("pages", "Polls have no pages yet."));
+        if (draft.Groups is { Count: > 0 }) extra.Add(new DraftError("groups", "Polls have no groups yet."));
+        for (var i = 0; i < (draft.Questions?.Count ?? 0); i++)
+            if (draft.Questions![i]?.Type is PollType.Choice or PollType.Text or PollType.Number)
+                extra.Add(new DraftError($"questions[{i}].type", "Choose Ranked, Points or Dates."));
         var closesOn = draft.ClosesOn;
         if (closesOn is { } day && day != existing?.ClosesOn && createdAt is { } created && LatestClose(maxDurationDays, created) is { } latest
             && day > latest)

@@ -66,6 +66,7 @@ else
         PollType.Ranked => "Your ranking",
         PollType.Points => "Your points",
         PollType.Dates => "Your availability",
+        PollType.Choice or PollType.Text or PollType.Number => throw new NotSupportedException(), // §34 step 2
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
     };
 }
