@@ -1,14 +1,15 @@
 @* Text question field inside the static vote form (DESIGN.md §34.3): one line or a box. The answer is free text, kept
-   apart from the scored ballot and encrypted; the voter sees their own text, other voters never do. *@
+   apart from the scored ballot and encrypted; the voter sees their own text, other voters never do. The required, maxlength
+   and minlength attributes are the server's rules (BallotValidator.ValidateText, which trims and stays authoritative). *@
 @if (Question.Multiline)
 {
     <textarea class="form-control text-answer" id="@Values.Id("text")" name="@Values.FieldName(BallotForm.TextField)" rows="5"
-              maxlength="@Max" aria-label="@Label">@Values.Text</textarea>
+              maxlength="@Max" minlength="@Question.MinLength" required="@Question.Required" aria-label="@Label">@Values.Text</textarea>
 }
 else
 {
     <input type="text" class="form-control text-answer" id="@Values.Id("text")" name="@Values.FieldName(BallotForm.TextField)"
-           maxlength="@Max" aria-label="@Label" value="@Values.Text" />
+           maxlength="@Max" minlength="@Question.MinLength" required="@Question.Required" aria-label="@Label" value="@Values.Text" />
 }
 
 @code {
