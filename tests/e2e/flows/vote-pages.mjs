@@ -2,23 +2,9 @@
 // who leaves after page 1 and resumes the draft, and without JS (the app's scripts fail to load: plain form posts, the
 // carry field between the pages). The owner's results, ballots view and ballots CSV of it (§34.5) in between.
 import { formAge } from './setup.mjs';
+import { buildSurvey } from './structured-editor.mjs';
 
 export const name = 'vote-pages';
-
-// TEMPORARY (§34 step 2, remove in step 4): the editor cannot build such a poll yet. With Polls:TemporaryAllowStructuredPolls
-// on (lib/app.mjs) it restores a new poll's browser draft with several questions, and Create poll saves it whole.
-const survey = {
-  title: 'Party (e2e)', voterMode: 'Public', responses: 'One', names: 'Optional', resultsVisibility: 'Creator',
-  pages: [{ key: 'a', title: 'Attending', description: '' }, { key: 'b', title: 'Food', description: '' }],
-  groups: [{ key: 'g', title: 'You', description: '' }],
-  questions: [
-    { prompt: 'Dishes', type: 'Ranked', page: 'a', options: [{ label: 'Soup' }, { label: 'Salad' }, { label: 'Stew' }] },
-    { prompt: 'Coming?', type: 'Choice', required: true, page: 'a', group: 'g', options: [{ label: 'Yes' }, { label: 'No' }] },
-    { prompt: 'Guests', type: 'Number', page: 'a', group: 'g', min: 0, max: 5, unit: 'people' },
-    { prompt: 'Diet', type: 'Choice', page: 'b', maxSelect: 2, allowOther: true, options: [{ label: 'Vegan' }, { label: 'Fish' }] },
-    { prompt: 'Notes', type: 'Text', page: 'b', multiline: true },
-  ],
-};
 
 const onPage = (page, n) => page.waitFor(`document.querySelector('[aria-current="step"]')?.textContent.trim().startsWith('${n} · ')`, `page ${n}`, 15_000);
 const checked = (page, selector) => page.eval(`!!document.querySelector(${JSON.stringify(selector)})?.checked`);
@@ -40,11 +26,8 @@ async function fillPage1(page) {
 export async function run({ app, browser, state, check, tolerate, defer }) {
   // ---- the poll ----
   const admin = state.admin;
-  await admin.gotoInteractive('/polls');
-  await admin.eval(`localStorage.setItem('av-draft:' + document.body.dataset.avUser + ':new', ${JSON.stringify(JSON.stringify(survey))}), true`);
-  await admin.gotoInteractive('/polls/new');
-  await admin.waitFor(`document.querySelector('.editor-form input')?.value === ${JSON.stringify(survey.title)} || [...document.querySelectorAll('.editor-form input')].some(i => i.value === ${JSON.stringify(survey.title)})`,
-    'the restored draft in the editor');
+  // Built in the real editor (DESIGN.md §34.5): two pages, a group, ranked, choice, number, checkboxes with Other, text.
+  await buildSurvey(admin, 'Party (e2e)');
   await admin.interactive();
   await admin.clickText('Create poll', 'button');
   await admin.waitFor(`/^\\/polls\\/[^/]+\\/share$/.test(location.pathname)`, 'the share page after Create poll', 20_000);
