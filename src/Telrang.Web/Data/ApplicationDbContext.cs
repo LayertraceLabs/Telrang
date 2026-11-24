@@ -10,6 +10,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Ballot> Ballots => Set<Ballot>();
     public DbSet<InviteToken> InviteTokens => Set<InviteToken>();
     public DbSet<PollChange> PollChanges => Set<PollChange>();
+    public DbSet<ResponseDraft> ResponseDrafts => Set<ResponseDraft>();
     public DbSet<PollCreation> PollCreations => Set<PollCreation>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<SetupLink> SetupLinks => Set<SetupLink>();
@@ -149,6 +150,16 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(b => b.VoterIdentity).HasMaxLength(110);
             e.Property(b => b.DisplayName).HasMaxLength(60);
             e.Property(b => b.Alias).HasMaxLength(Features.Voting.BallotService.MaxNameLimit);
+        });
+
+        builder.Entity<ResponseDraft>(e =>
+        {
+            e.HasKey(d => new { d.PollId, d.UserId, d.ResponseNo });
+            e.HasOne(d => d.Poll).WithMany().HasForeignKey(d => d.PollId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<ApplicationUser>().WithMany().HasForeignKey(d => d.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(d => d.UserId).HasMaxLength(450);
+            e.Property(d => d.UpdatedAt).HasConversion(binaryTime);
+            e.HasIndex(d => d.UserId);
         });
 
         builder.Entity<PollChange>(e =>

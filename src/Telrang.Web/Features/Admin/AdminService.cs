@@ -177,6 +177,7 @@ public sealed class AdminService(
         // once 24 h have passed (pentest R2-POLLS-3).
         poll.UpdatedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
+        if (closed) await PollService.DeleteDraftsAsync(db, [poll.Id], ct);
         notifier.Changed(poll.Id);
         await LogAsync(caller, closed ? "poll.close" : "poll.reopen", "poll", encodedId, poll.Title);
         return new AdminOutcome(true, closed ? $"Closed “{poll.Title}”." : $"Reopened “{poll.Title}”.");
