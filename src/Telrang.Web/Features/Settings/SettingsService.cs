@@ -79,6 +79,12 @@ public static class SettingKeys
     /// <summary>Poll looks (DESIGN.md §34.6): on by default (no row); "false" = every poll shows the instance theme.</summary>
     public const string PollLooksEnabled = "Polls.LooksEnabled";
 
+    /// <summary>Reports of polls (DESIGN.md §34.8): on by default (no row); "false" hides the link and the form answers 404.</summary>
+    public const string ReportsEnabled = "Reports.Enabled";
+
+    /// <summary>Optional contact line for reports, plain text, shown on the legal page (DESIGN.md §34.8).</summary>
+    public const string ReportsContact = "Reports.Contact";
+
     /// <summary>Days after closing that a poll is deleted automatically; missing or 0 = never (default).</summary>
     public const string RetentionDeleteClosedAfterDays = "Retention.DeleteClosedAfterDays";
 
@@ -240,8 +246,16 @@ public sealed record AppSettingsSnapshot(
     string? WelcomeMarkdown,
     int RetentionDays = 0,
     bool AutoVerifyWithoutMail = false,
-    bool PollLooks = true)
+    bool PollLooks = true,
+    bool ReportsEnabled = true,
+    string? ReportsContact = null)
 {
+    /// <summary>Longest report contact line.</summary>
+    public const int MaxReportsContactLength = 200;
+
+    /// <summary>The legal page (<c>/about</c>) exists: its Markdown or the report contact line is set.</summary>
+    public bool HasLegalPage => LegalPageMarkdown is not null || ReportsContact is not null;
+
     public int Int(string key, int fallback) =>
         Raw.TryGetValue(key, out var v) && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? i : fallback;
 }
@@ -428,7 +442,9 @@ public sealed class SettingsService(
             Str(SettingKeys.HomeWelcomeMarkdown),
             Int(SettingKeys.RetentionDeleteClosedAfterDays, 0),
             bool.TryParse(Str(SettingKeys.AutoVerifyWithoutMail), out var autoVerify) && autoVerify,
-            !(bool.TryParse(Str(SettingKeys.PollLooksEnabled), out var looks) && !looks));
+            !(bool.TryParse(Str(SettingKeys.PollLooksEnabled), out var looks) && !looks),
+            !(bool.TryParse(Str(SettingKeys.ReportsEnabled), out var reports) && !reports),
+            Str(SettingKeys.ReportsContact));
     }
 }
 

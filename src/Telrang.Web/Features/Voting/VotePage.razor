@@ -245,7 +245,7 @@ else if (access is { } a)
         @if (a.Voter is { Kind: VoterKind.Cookie })
         {
             <p class="small text-secondary mt-3 mb-0 cookie-line">Editable in this browser only
-                @if (Settings.Current.LegalPageMarkdown is not null)
+                @if (Settings.Current.HasLegalPage)
                 {
                     <text>(<a href="about">cookie</a>)</text>
                 }
@@ -316,6 +316,7 @@ else if (access is { } a)
             <p class="mt-3"><a class="btn btn-outline-primary" href="p/@a.EncodedId/results" data-enhance-nav="false">See results</a></p>
         }
     }
+    <ReportLink Access="a" />
 }
 
 @code {

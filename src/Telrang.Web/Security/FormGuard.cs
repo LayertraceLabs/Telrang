@@ -74,7 +74,7 @@ public sealed class FormGuard(IDataProtectionProvider dataProtection, TimeProvid
             || p.Equals("/setup/recover", StringComparison.OrdinalIgnoreCase)
             || p.StartsWith("/setup/account/", StringComparison.OrdinalIgnoreCase))
             return true;
-        return false;
+        return Features.Reports.ReportRoutes.IsReportPath(path); // the report form (DESIGN.md §34.8)
     }
 }
 

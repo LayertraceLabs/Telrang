@@ -186,11 +186,12 @@ public sealed class ThemeService(Settings.SettingsService settings, BrandingServ
 
     /// <summary>
     /// Pages that must work whatever the custom CSS does get <see cref="AdminUrl"/>: the admin pages, sign-in and account
-    /// pages, setup and recovery, the unsubscribe page and the error pages (the static blocked/429/expired pages use it
+    /// pages, setup and recovery, the unsubscribe page, the report form and the error pages (the static blocked/429/expired pages use it
     /// too). A broken rule can then never lock an admin out of the controls that fix it.
     /// </summary>
     public static bool UsesAdminVariant(PathString path) =>
-        AdminVariantPrefixes.Any(p => path.StartsWithSegments(p, StringComparison.OrdinalIgnoreCase));
+        AdminVariantPrefixes.Any(p => path.StartsWithSegments(p, StringComparison.OrdinalIgnoreCase))
+        || Reports.ReportRoutes.IsReportPath(path); // the report form (DESIGN.md §34.8): usable whatever the custom CSS does
 
     public string UrlFor(PathString path) => UsesAdminVariant(path) ? AdminUrl : Url;
 

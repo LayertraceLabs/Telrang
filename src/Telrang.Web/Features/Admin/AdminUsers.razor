@@ -260,9 +260,14 @@ else
         return LoadAsync();
     }
 
+    /// <summary><c>admin?user=&lt;id&gt;</c>: only that account (the Reports tab links a poll's owner here), until a search is typed.</summary>
+    [SupplyParameterFromQuery(Name = "user")] private string? UserParam { get; set; }
+
+    private string? OnlyUser => string.IsNullOrWhiteSpace(query) && UserParam is { Length: > 0 and <= 450 } id ? id : null;
+
     private async Task LoadAsync()
     {
-        list = await WithAdminAsync((a, c) => a.SearchUsersAsync(c, query));
+        list = await WithAdminAsync((a, c) => a.SearchUsersAsync(c, query, userId: OnlyUser));
         limitEdits.Clear();
     }
 
@@ -283,7 +288,7 @@ else
         {
             return;
         }
-        var found = await WithAdminAsync((a, c) => a.SearchUsersAsync(c, query));
+        var found = await WithAdminAsync((a, c) => a.SearchUsersAsync(c, query, userId: OnlyUser));
         if (cts.IsCancellationRequested) return;
         list = found;
         confirming = null;

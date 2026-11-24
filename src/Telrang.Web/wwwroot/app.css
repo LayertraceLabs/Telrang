@@ -1240,6 +1240,8 @@ details[data-menu] > summary::-webkit-details-marker { display: none; }
 .hist-axis { stroke: var(--bs-tertiary-color); stroke-width: 0.5; }
 .hist-zero { fill: var(--bs-tertiary-color); }
 .confirm-panel { padding: 0.75rem; border: 1px solid var(--bs-danger-border-subtle); border-radius: var(--bs-border-radius-lg); background: var(--bs-danger-bg-subtle); }
+/* Reports tab (DESIGN.md §34.8): a reporter's details keep their line breaks, as plain text. */
+.report-text { white-space: pre-wrap; min-width: 12rem; }
 
 /* ---- Phase 5a: admin, account ------------------------------------------------------------- */
 .authenticator-key {
