@@ -16,7 +16,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Telrang.Web.Features.Admin;
 
 public sealed record AdminPollRow(string EncodedId, string Title, string OwnerEmail, PollType Type, int BallotCount,
-    bool IsClosed, bool ClosedManually, DateTimeOffset CreatedAt);
+    bool IsClosed, bool ClosedManually, DateTimeOffset CreatedAt, int QuestionCount = 1, int PageCount = 1)
+{
+    /// <summary>The type of a simple poll, the size of a structured one (DESIGN.md §34.1).</summary>
+    public string Kind => Polls.PollText.KindLine(Type, QuestionCount, PageCount);
+}
 
 /// <summary>Per-account limit overrides (null = global default, 0 = no limit), in <see cref="Fields"/> order.</summary>
 public sealed record UserLimitOverrides(int? ActivePolls, int? PollsPerDay, int? BallotsPerPoll, int? InvitesPerPoll, int? PollDurationDays,
@@ -158,11 +162,11 @@ public sealed class AdminService(
     {
         if (!await IsAdminAsync(caller)) return null;
         var rows = await db.Polls.AsNoTracking()
-            .Select(p => new { p.Id, p.Title, OwnerEmail = p.Owner!.Email, p.Type, Count = p.Ballots.Count, p.ClosedAt, p.ClosesAt, p.CreatedAt })
+            .Select(p => new { p.Id, p.Title, OwnerEmail = p.Owner!.Email, p.Type, Count = p.Ballots.Count, p.ClosedAt, p.ClosesAt, p.CreatedAt, p.QuestionCount, p.PageCount })
             .ToListAsync(ct);
         var now = time.GetUtcNow();
         return rows.Select(r => new AdminPollRow(PollId.Encode(r.Id), r.Title, emails.Display(r.OwnerEmail) ?? "(no email)", r.Type, r.Count,
-                PollState.IsClosed(r.ClosedAt, r.ClosesAt, now), r.ClosedAt is not null, r.CreatedAt))
+                PollState.IsClosed(r.ClosedAt, r.ClosesAt, now), r.ClosedAt is not null, r.CreatedAt, r.QuestionCount, r.PageCount))
             .OrderByDescending(r => r.CreatedAt) // in memory: SQLite cannot ORDER BY DateTimeOffset
             .ToList();
     }

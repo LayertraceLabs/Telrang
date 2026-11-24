@@ -309,11 +309,11 @@ public class ChangeLogTests
     public void Text_mode_carries_keys_by_exact_label()
     {
         var parsed = new List<OptionDraft> { new() { Label = "Pasta" }, new() { Label = "Pizza Napoli" }, new() { Label = "Pasta" } };
-        PollEditor.CarryKeys(parsed, [("Pizza Napoli", "pizza"), ("Pasta", "pasta")], PollType.Ranked);
+        QuestionEditor.CarryKeys(parsed, [("Pizza Napoli", "pizza"), ("Pasta", "pasta")], PollType.Ranked);
         Assert.Equal(["pasta", "pizza", null], parsed.Select(o => o.Key));
 
         var dates = new List<OptionDraft> { new() { Date = new DateOnly(2026, 11, 3), Start = new TimeOnly(19, 0) } };
-        PollEditor.CarryKeys(dates, [("2026-11-03 19:00", "2026-11-03-19-00")], PollType.Dates);
+        QuestionEditor.CarryKeys(dates, [("2026-11-03 19:00", "2026-11-03-19-00")], PollType.Dates);
         Assert.Equal("2026-11-03-19-00", dates[0].Key);
     }
 

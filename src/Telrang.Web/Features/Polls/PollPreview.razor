@@ -1,18 +1,113 @@
 @using Telrang.Web.Features.Voting
-@* Live preview beside the poll form (DESIGN.md §20.2): what voters will read. Built from the draft as it is, so it follows
+@* Live preview of the poll form (DESIGN.md §20.2, §34.5): what voters will read. Built from the draft as it is, so it follows
    every keystroke even while a field is invalid; when the draft is valid the validated definition (normalised labels,
-   date order) is shown instead. *@
+   date order, final keys) is shown instead. A simple ranked, points or dates poll shows its options; every other question
+   is rendered by the vote page's own QuestionInput, a structured poll page by page with its groups, so the preview cannot
+   drift from the vote page. The fields are inert: there is no form. *@
 
-@{ var q = PreviewQuestion; }
+@{ var d = PreviewDefinition; var simple = VoteLayout.IsSimple(d); var q = d.Questions[0]; }
 <div class="card editor-preview-card">
     <div class="card-body">
         <h3 class="h4 card-title text-break @(string.IsNullOrWhiteSpace(Draft.Title) ? "text-secondary" : "")">@(string.IsNullOrWhiteSpace(Draft.Title) ? "Untitled" : Draft.Title.Trim())</h3>
-        <p class="small text-secondary mb-2">@PollText.TypeName(q.Type) · @PollText.RulesLine(q)</p>
+        @if (simple)
+        {
+            var rules = PollText.RulesLine(q);
+            <p class="small text-secondary mb-2">@DraftOutline.TypeLabel(q.Type, q.MaxSelect)@(rules.Length > 0 ? " · " + rules : "")</p>
+        }
+        else
+        {
+            <p class="small text-secondary mb-2">@PollText.SizeLine(Math.Max(1, d.Pages.Count), d.Questions.Count)</p>
+        }
         @if (!string.IsNullOrWhiteSpace(Draft.Description))
         {
             <div class="poll-markdown border-top pt-2 mb-2">@Markdown(Draft.Description, Limits.DescriptionMax)</div>
         }
-        @if (q.Options.Count == 0)
+        @if (simple && q.Type is PollType.Ranked or PollType.Points or PollType.Dates)
+        {
+            @SimpleOptions(q)
+        }
+        else if (simple)
+        {
+            <QuestionInput Definition="d" Question="q" Values="ValuesOf(q)" TextMax="Limits.TextAnswerMax" />
+        }
+        else
+        {
+            var pages = VoteLayout.Pages(d);
+            var shown = Math.Clamp(page, 0, pages.Count - 1);
+            var current = pages[shown];
+            @if (pages.Count > 1)
+            {
+                <div class="preview-pages d-flex flex-wrap gap-1 mb-2" role="group" aria-label="Preview page">
+                    @foreach (var pg in pages)
+                    {
+                        var n = pg.Number - 1;
+                        <button type="button" class="btn btn-sm @(n == shown ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(n == shown ? "true" : "false")"
+                                @onclick="() => page = n">@pg.Number@(pg.Page is { Title.Length: > 0 } t ? " · " + t.Title : "")</button>
+                    }
+                </div>
+            }
+            @if (current.Page is { } pp)
+            {
+                @if (pp.Title.Length > 0)
+                {
+                    <h4 class="h5 text-break mb-1">@pp.Title</h4>
+                }
+                @if (!string.IsNullOrWhiteSpace(pp.DescriptionMarkdown))
+                {
+                    <div class="poll-markdown mb-3">@Markdown(pp.DescriptionMarkdown, Limits.DescriptionMax)</div>
+                }
+            }
+            @foreach (var block in current.Blocks)
+            {
+                @if (block.Group is { } g)
+                {
+                    <fieldset class="vote-group mb-4" @key="g.Key">
+                        <legend class="h5 text-break">@g.Title</legend>
+                        @if (!string.IsNullOrWhiteSpace(g.DescriptionMarkdown))
+                        {
+                            <div class="poll-markdown small text-secondary mb-2">@Markdown(g.DescriptionMarkdown, Limits.DescriptionMax)</div>
+                        }
+                        @foreach (var bq in block.Questions)
+                        {
+                            <QuestionInput Definition="d" Question="bq" Values="ValuesOf(bq)" TextMax="Limits.TextAnswerMax" @key="bq.Key" />
+                        }
+                    </fieldset>
+                }
+                else
+                {
+                    @foreach (var bq in block.Questions)
+                    {
+                        <QuestionInput Definition="d" Question="bq" Values="ValuesOf(bq)" TextMax="Limits.TextAnswerMax" @key="bq.Key" />
+                    }
+                }
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PollDraft Draft { get; set; } = default!;
+
+    /// <summary>The validated definition when the draft is valid (null otherwise).</summary>
+    [Parameter] public PollDefinition? Definition { get; set; }
+
+    [Parameter] public string? DefaultTimeZone { get; set; }
+
+    /// <summary>The admin's limits: text over them is not rendered (pentest R2-POLLS-1).</summary>
+    [Parameter] public PollLimits Limits { get; set; } = PollLimits.Default;
+
+    /// <summary>The page of a structured poll shown (0-based).</summary>
+    private int page;
+
+    private static RenderFragment Markdown(string text, int max) => builder =>
+    {
+        if (text.Trim().Length > max) builder.AddMarkupContent(0, "<p class=\"text-secondary\">Too long to preview.</p>");
+        else builder.AddContent(0, MarkdownRenderer.Render(text));
+    };
+
+    private RenderFragment SimpleOptions(PollQuestion q) => __builder =>
+    {
+        if (q.Options.Count == 0)
         {
             <p class="text-secondary small mb-0">No options yet.</p>
         }
@@ -39,49 +134,85 @@
                 }
             </ol>
         }
-    </div>
-</div>
-
-@code {
-    [Parameter, EditorRequired] public PollDraft Draft { get; set; } = default!;
-
-    /// <summary>The validated definition when the draft is valid (null otherwise).</summary>
-    [Parameter] public PollDefinition? Definition { get; set; }
-
-    [Parameter] public string? DefaultTimeZone { get; set; }
-
-    /// <summary>The admin's limits: text over them is not rendered (pentest R2-POLLS-1).</summary>
-    [Parameter] public PollLimits Limits { get; set; } = PollLimits.Default;
-
-    private static RenderFragment Markdown(string text, int max) => builder =>
-    {
-        if (text.Trim().Length > max) builder.AddMarkupContent(0, "<p class=\"text-secondary\">Too long to preview.</p>");
-        else builder.AddContent(0, MarkdownRenderer.Render(text));
     };
 
-    /// <summary>The definition's question, else a lenient one from the draft (blank options left out).</summary>
-    private PollQuestion PreviewQuestion
+    /// <summary>Empty fields under a preview prefix: ids and names of their own, nothing posted.</summary>
+    private static BallotForm ValuesOf(PollQuestion q) => BallotForm.FromAnswer(q, null, "pv" + q.Key + ".");
+
+    /// <summary>The definition, else a lenient one from the draft (blank options left out, settings clamped to what can render).</summary>
+    private PollDefinition PreviewDefinition
     {
         get
         {
-            if (Definition is { Questions.Count: > 0 } d) return d.Questions[0];
-            var q = Draft.Questions.Count > 0 ? Draft.Questions[0] : new QuestionDraft();
-            var options = q.Type == PollType.Dates
-                ? q.Options.Where(o => o.Date is not null).OrderBy(o => o.Date).ThenBy(o => o.Start).ThenBy(o => o.End)
-                    .Select((o, i) => new PollOption($"o{i}", Telrang.Core.Polls.PollRules.DateLabel(o.Date!.Value, o.Start, o.End), o.Description ?? "")
-                    { Date = o.Date, Start = o.Start, End = o.End })
-                : q.Options.Where(o => !string.IsNullOrWhiteSpace(o.Label))
-                    .Select((o, i) => new PollOption($"o{i}", o.Label.Trim(), o.Description ?? ""));
-            return new PollQuestion(PollDefinition.QuestionKey(0), q.Type, options.ToList())
+            if (Definition is { Questions.Count: > 0 } d) return d;
+            var pageKeys = new Dictionary<string, string>(StringComparer.Ordinal);
+            var pages = new List<PollPage>();
+            for (var i = 0; i < Draft.Pages.Count; i++)
             {
-                Scoring = q.Scoring,
-                MaxBans = Math.Max(0, q.Bans),
-                RankAll = q.RankAll,
-                Budget = q.Budget,
-                MaxPerOption = q.MaxPerOption,
-                SpendAll = q.SpendAll,
-                Maybe = q.Maybe,
-            };
+                var p = Draft.Pages[i];
+                var key = "p" + (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (p.Key is { } k) pageKeys.TryAdd(k, key);
+                pages.Add(new PollPage(key, Fit(p.Title, Limits.TitleMax), Fit(p.Description, Limits.DescriptionMax)));
+            }
+            var groupKeys = new Dictionary<string, string>(StringComparer.Ordinal);
+            var groups = new List<PollGroup>();
+            for (var i = 0; i < Draft.Groups.Count; i++)
+            {
+                var g = Draft.Groups[i];
+                var key = "g" + (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (g.Key is { } k) groupKeys.TryAdd(k, key);
+                groups.Add(new PollGroup(key, Fit(g.Title, Limits.TitleMax), Fit(g.Description, Limits.DescriptionMax)));
+            }
+            var questions = Draft.Questions.Count == 0 ? [new QuestionDraft()] : Draft.Questions;
+            var built = questions.Select((q, i) => Lenient(q, i) with
+            {
+                Page = q.Page is { } pk && pageKeys.TryGetValue(pk, out var pv) ? pv : pages.FirstOrDefault()?.Key,
+                Group = q.Group is { } gk && groupKeys.TryGetValue(gk, out var gv) ? gv : null,
+            }).ToList();
+            return new PollDefinition(Fit(Draft.Title, Limits.TitleMax), "", built) { Pages = pages, Groups = groups };
         }
+    }
+
+    private static string Fit(string? text, int max)
+    {
+        var t = (text ?? "").Trim();
+        return t.Length <= max ? t : "";
+    }
+
+    private PollQuestion Lenient(QuestionDraft q, int index)
+    {
+        var options = q.Type == PollType.Dates
+            ? q.Options.Where(o => o.Date is not null).OrderBy(o => o.Date).ThenBy(o => o.Start).ThenBy(o => o.End)
+                .Select((o, i) => new PollOption($"o{i}", Telrang.Core.Polls.PollRules.DateLabel(o.Date!.Value, o.Start, o.End), o.Description ?? "")
+                { Date = o.Date, Start = o.Start, End = o.End })
+            : Telrang.Core.Polls.PollRules.UsesOptions(q.Type)
+                ? q.Options.Where(o => !string.IsNullOrWhiteSpace(o.Label)).Select((o, i) => new PollOption($"o{i}", o.Label.Trim(), o.Description ?? ""))
+                : [];
+        var maxSelect = Math.Max(1, q.MaxSelect);
+        static decimal? Bounded(decimal? v) => v is { } x && Math.Abs(x) <= Telrang.Core.Polls.PollRules.NumberAbsMax ? x : null;
+        return new PollQuestion(PollDefinition.QuestionKey(index), System.Enum.IsDefined(q.Type) ? q.Type : PollType.Ranked, options.ToList())
+        {
+            Prompt = Fit(q.Prompt, Limits.PromptMax),
+            HelpMarkdown = Fit(q.Help, Limits.HelpMax),
+            Required = q.Required,
+            Scoring = q.Scoring,
+            MaxBans = Math.Max(0, q.Bans),
+            RankAll = q.RankAll,
+            Budget = q.Budget is > 0 ? q.Budget : null,
+            MaxPerOption = q.MaxPerOption is > 0 ? q.MaxPerOption : null,
+            SpendAll = q.SpendAll,
+            Maybe = q.Maybe,
+            MinSelect = Math.Clamp(q.MinSelect, 1, maxSelect),
+            MaxSelect = maxSelect,
+            AllowOther = q.AllowOther,
+            Display = maxSelect == 1 && q.Display == ChoiceDisplay.Dropdown ? ChoiceDisplay.Dropdown : ChoiceDisplay.Buttons,
+            Multiline = q.Multiline,
+            MinLength = q.MinLength is > 0 and var lo && lo <= Limits.TextAnswerMax ? lo : null,
+            MaxLength = q.MaxLength is > 0 and var hi && hi <= Limits.TextAnswerMax ? hi : null,
+            Min = Bounded(q.Min),
+            Max = Bounded(q.Max),
+            Decimals = Math.Clamp(q.Decimals, 0, Telrang.Core.Polls.PollRules.MaxDecimals),
+            Unit = Fit(q.Unit, Telrang.Core.Polls.PollRules.UnitMax),
+        };
     }
 }

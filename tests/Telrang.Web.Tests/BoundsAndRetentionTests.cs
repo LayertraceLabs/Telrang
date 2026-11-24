@@ -38,7 +38,7 @@ public class BoundsAndRetentionTests
     [Fact]
     public void Options_text_is_parsed_on_change_and_capped_in_length()
     {
-        var razor = File.ReadAllText(RepoFile("src", "Telrang.Web", "Features", "Polls", "PollEditor.razor"));
+        var razor = File.ReadAllText(RepoFile("src", "Telrang.Web", "Features", "Polls", "QuestionEditor.razor"));
         var start = razor.IndexOf("private RenderFragment OptionsText()", StringComparison.Ordinal);
         var textarea = razor[start..razor.IndexOf("</textarea>", start, StringComparison.Ordinal)];
         Assert.Contains("@bind=\"optionsText\"", textarea);

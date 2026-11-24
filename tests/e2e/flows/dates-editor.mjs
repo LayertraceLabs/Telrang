@@ -143,7 +143,7 @@ export async function run({ state, check }) {
   check('0001-01-01 can be selected', (await selected(page)).includes('0001-01-01'));
 
   // ---- past the options limit: refused, saying how many fit -------------------------------------------------------
-  await page.clickText('Text', 'label');
+  await page.clickText('Text', '[aria-label="Options editor"] label');
   await page.waitFor(`!!document.querySelector('textarea.editor-options-text')`, 'the dates text');
   await page.fill('textarea.editor-options-text', '- 2031-01-01 to 2031-04-05\n');
   await page.clickText('Calendar', 'label');

@@ -39,7 +39,7 @@ else
                         <a class="fw-semibold" href="p/@p.EncodedId" data-enhance-nav="false">@p.Title</a>
                         <div class="small text-secondary">
                             <span class="badge @(p.IsClosed ? "text-bg-secondary" : "badge-open") me-1">@(p.IsClosed ? "Closed" : "Open")</span>
-                            @PollText.TypeName(p.Type) · @p.BallotCount @(p.BallotCount == 1 ? "ballot" : "ballots") · by @p.OwnerEmail · created @PollText.Date(p.CreatedAt)
+                            @p.Kind · @p.BallotCount @(p.BallotCount == 1 ? "ballot" : "ballots") · by @p.OwnerEmail · created @PollText.Date(p.CreatedAt)
                         </div>
                     </div>
                     <div class="d-flex flex-wrap gap-2">

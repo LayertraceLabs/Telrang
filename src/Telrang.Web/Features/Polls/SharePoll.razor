@@ -32,7 +32,7 @@
                 <button type="button" class="btn btn-primary" data-copy="@PublicLink" data-copy-status="public-link-status">Copy</button>
             </div>
             <div class="form-text" id="public-link-status" role="status"></div>
-            <p class="small mb-0 mt-2 mode-line">@PollText.ModeLine(a.Poll.VoterMode, a.Definition.Responses)</p>
+            <p class="small mb-0 mt-2 mode-line">@PollText.KindLine(a.Poll.Type, a.Poll.QuestionCount, a.Poll.PageCount) · @PollText.ModeLine(a.Poll.VoterMode, a.Definition.Responses)</p>
         </div>
     </section>
 
