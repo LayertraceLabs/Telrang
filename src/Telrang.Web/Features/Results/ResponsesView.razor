@@ -1,0 +1,47 @@
+@* The ballots view of a structured poll, or of one choice, text or number question (DESIGN.md §34.5): one row per
+   response (named for the viewer, BallotTable), one column per question, each cell the answer's text form (AnswerText):
+   the owner gets free text and aliases, voters "answered" and names. In submission order, one page of RowWindow.PageSize
+   responses (DESIGN.md §31); cells are plain markup in <bdi>. *@
+<h2 class="h5" id="@BallotsView.Anchor">Ballots</h2>
+@if (Window.Total == 0)
+{
+    <p class="text-secondary">No responses yet.</p>
+}
+else
+{
+    <RowsPager Window="Window" BaseHref="@BaseHref" Anchor="@BallotsView.Anchor" Label="Ballot pages" Noun="Ballots" />
+    <div class="table-responsive ballots-scroll">
+        <table class="table table-sm align-middle ballots-table ballots-responses">
+            <thead>
+                <tr>
+                    <th scope="col" class="ballots-sticky">Name</th>
+                    @foreach (var q in Table.Questions)
+                    {
+                        <th scope="col" class="ballots-name" @key="q.Key"><bdi>@BallotService.QuestionLabel(Definition, q)</bdi></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Table.Rows)
+                {
+                    <tr>
+                        <th scope="row" class="ballots-sticky"><bdi>@r.Name</bdi></th>
+                        @foreach (var c in r.Cells)
+                        {
+                            <td class="ballots-cell free-text"><bdi>@c</bdi></td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public ResponseTable Table { get; set; } = default!;
+    [Parameter, EditorRequired] public RowWindow Window { get; set; } = default!;
+
+    /// <summary>The ballots view's address (<c>p/{id}/results?view=ballots</c>), for the pager.</summary>
+    [Parameter, EditorRequired] public string BaseHref { get; set; } = "";
+}

@@ -1671,3 +1671,16 @@ button.dates-cell:hover:not(:disabled) { border-color: var(--av-primary); }
 .ballots-table .ballots-cell { min-width: 6rem; max-width: 12rem; overflow-wrap: anywhere; }
 .ballots-table .ballots-number { text-align: center; font-variant-numeric: tabular-nums; }
 .ballots-points .ballots-sticky { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+/* Structured polls (DESIGN.md §34.5): one row per response, one column per question. */
+.ballots-responses .ballots-sticky { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; }
+.ballots-responses .ballots-cell { max-width: 16rem; }
+
+/* ---- Free text and new question types (DESIGN.md §34.3) -------------------------------------------- */
+/* Free text is plain text: kept as typed (line breaks), broken anywhere so a long word never widens the page. */
+.free-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.free-text-list { max-width: 48rem; }
+.free-text-item { padding: 0.35rem 0; border-bottom: 1px solid var(--av-border); }
+.free-text-item:last-child { border-bottom: 0; }
+.results-stats .list-inline-item { font-variant-numeric: tabular-nums; }
+.histogram.histogram-wide { width: 100%; max-width: 20rem; height: 3rem; }
+.choice-results .opt-col { min-width: 10rem; }

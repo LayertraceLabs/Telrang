@@ -236,6 +236,30 @@ public sealed class LiveResultsStreamTests
     }
 
     [Fact]
+    public async Task A_structured_poll_streams_like_any_other()
+    {
+        var (factory, _, ownerId) = await StartAsync();
+        await using var _f = factory;
+        var id = await CreatePollAsync(factory, ownerId, MultiPageVoteTests.Survey());
+        var owner = await LoggedInBrowserAsync(factory, "o@example.com");
+        await using var reader = await OpenOkAsync(owner, id);
+
+        var answers = new Dictionary<string, Features.Voting.QuestionAnswer>
+        {
+            ["q1"] = new() { Choice = new ChoiceBallot(["yes"]) },
+            ["q4"] = new() { Text = "A note" },
+        };
+        Assert.True((await WithScope(factory, sp => sp.GetRequiredService<Features.Voting.BallotService>()
+            .SubmitResponseAsync(id, new VisitorContext(null, "v1", null), answers, null))).Succeeded);
+        Assert.Equal(new SseEvent("changed", "", "3000"), await reader.NextAsync());
+
+        // What the stream makes js/results-live.js fetch: the owner's page, with the new response.
+        var html = WebUtility.HtmlDecode(await (await GetPageAsync(owner, $"/p/{id}/results")).Content.ReadAsStringAsync());
+        Assert.Contains("A note", html);
+        Assert.Contains($"data-live-src=\"p/{id}/results/live\"", html);
+    }
+
+    [Fact]
     public async Task Anyone_but_the_owner_gets_404()
     {
         var (factory, _, ownerId) = await StartAsync();

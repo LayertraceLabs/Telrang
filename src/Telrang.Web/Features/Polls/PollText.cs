@@ -188,6 +188,16 @@ public static class PollText
 
     public static string DateTime(DateTimeOffset d) => d.UtcDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " UTC";
 
+    /// <summary>"1 answer", "5 answers": how many responses answered a question (DESIGN.md §34.3).</summary>
+    public static string AnswersText(int n) => n.ToString(CultureInfo.InvariantCulture) + (n == 1 ? " answer" : " answers");
+
+    /// <summary>
+    /// A number answer or statistic, invariant, without trailing zeros; a computed value (mean, median) rounded to
+    /// <paramref name="decimals"/> places (answers themselves are never rounded, DESIGN.md §34.3).
+    /// </summary>
+    public static string Decimal(decimal value, int decimals = 28) =>
+        new Telrang.Core.Ballots.NumberBallot(Math.Round(value, Math.Clamp(decimals, 0, 28), MidpointRounding.AwayFromZero)).ToInvariantString();
+
     public static string Score(double score, ScoringScheme scheme) =>
         scheme == ScoringScheme.Borda
             ? Math.Round(score).ToString(CultureInfo.InvariantCulture)

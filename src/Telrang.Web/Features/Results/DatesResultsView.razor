@@ -17,7 +17,7 @@
     </p>
 }
 
-<DatesViews Options="Definition.Questions[0].Options">
+<DatesViews Options="Q.Options">
     <Cell>
         @{
             var row = rows.GetValueOrDefault(context.Option.Key);
@@ -38,7 +38,7 @@
                     <rect class="dates-stack-yes" x="0" y="0" width="@Pct(row.Yes)" height="6" />
                     <rect class="dates-stack-maybe" x="@Pct(row.Yes)" y="0" width="@Pct(row.Maybe)" height="6" />
                 </svg>
-                <span class="small text-nowrap dates-result-numbers">@row.Yes yes@(Definition.Questions[0].Maybe || row.Maybe > 0 ? $" · {row.Maybe} maybe" : "") · @row.No no</span>
+                <span class="small text-nowrap dates-result-numbers">@row.Yes yes@(Q.Maybe || row.Maybe > 0 ? $" · {row.Maybe} maybe" : "") · @row.No no</span>
             </div>
         }
         else
@@ -47,7 +47,7 @@
                 <span class="dates-cell-label" aria-hidden="true">@DatesFormat.SlotLabel(context.Option)</span>
                 <span class="dates-result-counts" aria-hidden="true">
                     <span class="dates-count-yes"><Icon Name="check" />@row.Yes</span>
-                    @if (Definition.Questions[0].Maybe || row.Maybe > 0)
+                    @if (Q.Maybe || row.Maybe > 0)
                     {
                         <span class="dates-count-maybe"><Icon Name="question" />@row.Maybe</span>
                     }
@@ -60,6 +60,11 @@
 
 @code {
     [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+
+    /// <summary>The question shown (DESIGN.md §34.5); a simple poll's only question when not given.</summary>
+    [Parameter] public PollQuestion? Question { get; set; }
+
+    private PollQuestion Q => Question ?? Definition.Questions[0];
     [Parameter, EditorRequired] public DatesResultSet Results { get; set; } = default!;
     private Dictionary<string, DatesResultRow> rows = new(StringComparer.Ordinal);
     private List<DatesResultRow> Best = [];
@@ -74,10 +79,10 @@
     private static bool IsBest(DatesResultRow r) => r.Place == 1 && r.Yes + r.Maybe > 0;
 
     private PollOption OptionOf(DatesResultRow r) =>
-        Definition.Questions[0].Options.FirstOrDefault(o => o.Key == r.Key) ?? new PollOption(r.Key, r.Label, "");
+        Q.Options.FirstOrDefault(o => o.Key == r.Key) ?? new PollOption(r.Key, r.Label, "");
 
     private string Counts(DatesResultRow r) =>
-        Definition.Questions[0].Maybe || r.Maybe > 0 ? $"{r.Yes} yes, {r.Maybe} maybe" : $"{r.Yes} yes";
+        Q.Maybe || r.Maybe > 0 ? $"{r.Yes} yes, {r.Maybe} maybe" : $"{r.Yes} yes";
 
     private string Pct(int count) =>
         (Results.VoterCount == 0 ? 0 : count * 100.0 / Results.VoterCount).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);

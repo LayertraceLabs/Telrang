@@ -1,0 +1,47 @@
+@* One question's results (DESIGN.md §34.5), the one switch over the per-type views: the results page renders every
+   question through it, a simple poll's only question without a heading. Free text (FreeTextList) only when the page
+   passes the owner's TextsAsync page for this question; nothing here shows a text otherwise. *@
+@switch (Question.Type)
+{
+    case PollType.Ranked:
+        <RankedResultsView Definition="Definition" Question="Question" Results="Result.Ranked!" />
+        break;
+    case PollType.Points:
+        <PointsResultsView Definition="Definition" Question="Question" Results="Result.Points" Distribution="Result.PointsDistribution" />
+        break;
+    case PollType.Dates:
+        <DatesResultsView Definition="Definition" Question="Question" Results="Result.Dates!" />
+        break;
+    case PollType.Choice:
+        <ChoiceResultsView Question="Question" Results="Result.Choice!" />
+        @if (Texts is { } other)
+        {
+            <FreeTextList Answers="other" PageHref="@PageHref" />
+        }
+        break;
+    case PollType.Number:
+        <NumberResultsView Question="Question" Results="Result.Number!" />
+        break;
+    case PollType.Text:
+        <p class="small text-secondary mb-2">@PollText.AnswersText(Result.Text!.AnswerCount)</p>
+        @if (Texts is { } answers)
+        {
+            <FreeTextList Answers="answers" PageHref="@PageHref" />
+        }
+        break;
+    default:
+        throw new InvalidOperationException($"No results for question type {Question.Type}.");
+}
+
+@code {
+    [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+    [Parameter, EditorRequired] public QuestionResult Result { get; set; } = default!;
+
+    /// <summary>The owner's free text of this question (ResultsService.TextsAsync); null for everyone else.</summary>
+    [Parameter] public TextAnswers? Texts { get; set; }
+
+    /// <summary>The results page's address (<c>p/{id}/results</c>), for the free text pager.</summary>
+    [Parameter] public string PageHref { get; set; } = "";
+
+    private PollQuestion Question => Result.Question;
+}

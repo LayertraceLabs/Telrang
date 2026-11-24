@@ -1,0 +1,31 @@
+@* The SVG histogram of the results page (DESIGN.md §33): the points "Spread" and the number question's distribution
+   (DESIGN.md §34.5) use the same one. Each bar names its value in an SVG <title> and has a full-height transparent hit
+   area, so empty and short bars show their count too; the text for screen readers sits beside it. Sizes are SVG
+   attributes (the CSP forbids style attributes). Rendered with Histogram.Render, plain markup, no component per row. *@
+
+@code {
+    /// <param name="Title">The hover text, e.g. "1–15 points: 2 voters (29%)".</param>
+    /// <param name="Muted">A bar that is no real value (points: 0 points), drawn in the muted colour.</param>
+    public sealed record Bar(int Count, string Title, bool Muted = false);
+
+    /// <param name="cssClass">An extra class on the SVG (its width), none for the points spread.</param>
+    public static RenderFragment Render(IReadOnlyList<Bar> bars, string screenReaderText, string? cssClass = null) => __builder =>
+    {
+        var bucketMax = Math.Max(1, bars.Count == 0 ? 0 : bars.Max(b => b.Count));
+        <svg class="@(cssClass is null ? "histogram" : "histogram " + cssClass)" viewBox="0 0 @(bars.Count * 10) 30" preserveAspectRatio="none" aria-hidden="true">
+            @for (var k = 0; k < bars.Count; k++)
+            {
+                var h = bars[k].Count * 28.0 / bucketMax;
+                <g>
+                    <title>@bars[k].Title</title>
+                    <rect class="hist-hit" x="@(k * 10)" y="0" width="10" height="30" />
+                    <rect class="hist-bar @(bars[k].Muted ? "hist-zero" : "")" x="@(k * 10 + 1)" y="@F(30 - h)" width="8" height="@F(h)" />
+                </g>
+            }
+            <line class="hist-axis" x1="0" y1="30" x2="@(bars.Count * 10)" y2="30" />
+        </svg>
+        <span class="visually-hidden">@screenReaderText</span>
+    };
+
+    private static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+}
