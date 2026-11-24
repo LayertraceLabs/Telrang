@@ -23,6 +23,10 @@
     case OptionChangeKind.Earlier:
         <text>@PollText.EarlierChanges(BallotCount ?? 0)</text>
         break;
+    case OptionChangeKind.QuestionAdded:
+    case OptionChangeKind.QuestionRemoved:
+    case OptionChangeKind.QuestionRenamed:
+        throw new NotSupportedException(); // §34 step 2
     default:
         throw new ArgumentOutOfRangeException(nameof(Kind), Kind, null);
 }

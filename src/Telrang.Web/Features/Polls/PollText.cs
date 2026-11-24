@@ -69,6 +69,7 @@ public static class PollText
         OptionChangeKind.TitleChanged => $"Title changed: “{oldLabel}” → “{label}”",
         OptionChangeKind.DescriptionChanged => "Description changed",
         OptionChangeKind.Earlier => EarlierChanges(ballotCount ?? 0),
+        OptionChangeKind.QuestionAdded or OptionChangeKind.QuestionRemoved or OptionChangeKind.QuestionRenamed => throw new NotSupportedException(), // §34 step 2
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
