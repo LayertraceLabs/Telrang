@@ -12,7 +12,7 @@ namespace Telrang.Web.Tests;
 public partial class AdminHelpTests
 {
     private static readonly string[] TabFiles =
-        ["AdminUsers.razor", "AdminPolls.razor", "AdminSettings.razor", "AdminMail.razor", "AdminAbuse.razor", "AdminStatusTab.razor", "AdminLogTab.razor"];
+        ["AdminUsers.razor", "AdminPolls.razor", "AdminReports.razor", "AdminSettings.razor", "AdminMail.razor", "AdminAbuse.razor", "AdminStatusTab.razor", "AdminLogTab.razor"];
 
     private static string AdminFile(string name)
     {
@@ -85,7 +85,7 @@ public partial class AdminHelpTests
         });
         var browser = await LoggedInBrowserAsync(factory, "admin@example.com");
 
-        foreach (var tab in new[] { "users", "polls", "settings", "mail", "abuse", "status", "log" })
+        foreach (var tab in new[] { "users", "polls", "reports", "settings", "mail", "abuse", "status", "log" })
         {
             var response = await GetPageAsync(browser, "/admin?tab=" + tab);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);

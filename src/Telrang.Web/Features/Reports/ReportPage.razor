@@ -1,0 +1,138 @@
+@page "/p/{Id}/report"
+@layout PublicLayout
+@attribute [ExcludeFromInteractiveRouting]
+@* DESIGN.md §34.8: static SSR, no circuit, works without JS. A plain form posted back here (named form "report",
+   post/redirect/get) with the guard fields (FormGuard.IsGuarded) and its own rate limit. The poll comes from the URL
+   through PollAccessService: unknown = 404, disabled for this visitor = 410, as on the poll's other pages. No poll look
+   (PollHead is not rendered) and the stylesheet without custom CSS (ThemeService.UsesAdminVariant): neither the owner nor
+   a broken custom CSS can style the form away. *@
+@inject PollAccessService AccessService
+@inject ReportService Reports
+@inject SettingsService Settings
+@inject UserManager<ApplicationUser> Users
+@inject NavigationManager Nav
+
+@if (access is { Unavailable: true })
+{
+    <PollUnavailable />
+    @if (isPost)
+    {
+        <form method="post" action="@FormAction" @formname="@FormName" @onsubmit="SubmitAsync" hidden></form>
+    }
+}
+else if (access is { } a)
+{
+    <PageTitle>Report - @Settings.AppName</PageTitle>
+    <h1>Report poll</h1>
+    <p class="text-break"><a href="p/@a.EncodedId" data-enhance-nav="false"><bdi>@a.Definition.Title</bdi></a></p>
+    @if (Sent is not null && !isPost)
+    {
+        <div class="alert alert-success" role="status">Report sent.</div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-12 col-md-10 col-lg-8">
+                <form method="post" action="@FormAction" @formname="@FormName" @onsubmit="SubmitAsync" class="report-form">
+                    <AntiforgeryToken />
+                    <fieldset class="mb-3">
+                        <legend class="form-label fs-6">Category</legend>
+                        @foreach (var (category, label) in ReportService.Categories)
+                        {
+                            var fieldId = "report-" + category.ToString().ToLowerInvariant();
+                            <div class="form-check" @key="category">
+                                <input class="form-check-input" type="radio" name="@CategoryField" id="@fieldId" value="@category.ToString()"
+                                       checked="@(chosen == category)" required />
+                                <label class="form-check-label" for="@fieldId">@label</label>
+                            </div>
+                        }
+                    </fieldset>
+                    <div class="mb-3">
+                        <label for="report-text" class="form-label">Details (optional)</label>
+                        <textarea id="report-text" name="@TextField" class="form-control" rows="5" maxlength="@PollReport.MaxTextLength">@text</textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="report-contact" class="form-label">Your email (optional)</label>
+                        <input id="report-contact" name="@ContactField" type="email" class="form-control" maxlength="@PollReport.MaxContactLength"
+                               autocomplete="email" value="@contact" />
+                    </div>
+                    <p class="small text-secondary">Read by this site's admins only, never by the poll's owner.</p>
+                    <FormGuardFields />
+                    @if (errors.Count > 0)
+                    {
+                        <div class="alert alert-danger" role="alert">
+                            <ul class="mb-0">
+                                @foreach (var e in errors)
+                                {
+                                    <li>@e</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                    <button type="submit" class="btn btn-primary">Send report</button>
+                </form>
+            </div>
+        </div>
+    }
+    <p class="mt-3"><a href="p/@a.EncodedId" data-enhance-nav="false">Back to the poll</a></p>
+}
+
+@code {
+    public const string FormName = "report";
+    public const string CategoryField = "category", TextField = "text", ContactField = "contact";
+
+    [Parameter] public string Id { get; set; } = "";
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    /// <summary><c>?sent=1</c>: the confirmation after the post/redirect/get.</summary>
+    [SupplyParameterFromQuery(Name = "sent")] private string? Sent { get; set; }
+
+    private PollAccess? access;
+    private bool isPost;
+    private ReportCategory? chosen;
+    private string? text, contact;
+    private List<string> errors = [];
+
+    private string FormAction => ReportRoutes.For(access?.EncodedId ?? Id);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Settings.Current.ReportsEnabled) { Nav.NotFound(); return; }
+        isPost = HttpMethods.IsPost(Http.Request.Method);
+        // The account only decides whether a disabled poll is the visitor's to see; nothing of it is stored with a report.
+        access = await AccessService.GetAsync(Id, VisitorContext.ForUser(Users.GetUserId(Http.User)), Http.RequestAborted);
+        if (access is null) { Nav.NotFound(); return; }
+        if (access.Unavailable) PollUnavailable.Answer(Http);
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (access is null or { Unavailable: true }) return;
+        var form = await Http.Request.ReadFormAsync(Http.RequestAborted);
+        chosen = ReportService.ParseCategory(form[CategoryField]);
+        text = form[TextField].ToString();
+        contact = form[ContactField].ToString();
+        var result = await Reports.SubmitAsync(access.EncodedId, Users.GetUserId(Http.User), chosen, text, contact, Http.RequestAborted);
+        switch (result.Status)
+        {
+            case ReportStatus.Sent:
+                Nav.NavigateTo(FormAction + "?sent=1"); // post/redirect/get
+                break;
+            case ReportStatus.Invalid:
+                errors = [.. result.Errors];
+                // Re-rendered as typed, but never more than the field holds.
+                if (text.Length > PollReport.MaxTextLength * 2) text = text[..(PollReport.MaxTextLength * 2)];
+                if (contact.Length > PollReport.MaxContactLength * 2) contact = contact[..(PollReport.MaxContactLength * 2)];
+                break;
+            case ReportStatus.Unavailable:
+                access = access with { Unavailable = true };
+                PollUnavailable.Answer(Http);
+                break;
+            case ReportStatus.NotFound:
+            case ReportStatus.Off:
+                Nav.NotFound();
+                break;
+            default:
+                throw new InvalidOperationException($"Unknown report status {result.Status}.");
+        }
+    }
+}

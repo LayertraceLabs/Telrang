@@ -21,7 +21,12 @@
     @foreach (var (key, label) in Tabs)
     {
         <li class="nav-item">
-            <a class="nav-link @(CurrentTab == key ? "active" : "")" aria-current="@(CurrentTab == key ? "page" : null)" href="@(key == "users" ? "admin" : "admin?tab=" + key)">@label</a>
+            <a class="nav-link @(CurrentTab == key ? "active" : "")" aria-current="@(CurrentTab == key ? "page" : null)" href="@(key == "users" ? "admin" : "admin?tab=" + key)">
+                @label
+                @if (key == "reports" && stats is { OpenReports: > 0 } open)
+                {
+                    <span class="badge text-bg-danger ms-1" title="Open reports">@open.OpenReports</span>
+                }</a>
         </li>
     }
 </ul>
@@ -33,6 +38,10 @@
 @if (CurrentTab == "polls")
 {
     <AdminPolls />
+}
+else if (CurrentTab == "reports")
+{
+    <AdminReports Changed="LoadStatsAsync" />
 }
 else if (CurrentTab == "settings")
 {
@@ -62,7 +71,7 @@ else
 
 @code {
     private static readonly (string Key, string Label)[] Tabs =
-        [("users", "Users"), ("polls", "Polls"), ("settings", "Settings"), ("mail", "Mail"), ("abuse", "Abuse"), ("status", "Status"), ("log", "Log")];
+        [("users", "Users"), ("polls", "Polls"), ("reports", "Reports"), ("settings", "Settings"), ("mail", "Mail"), ("abuse", "Abuse"), ("status", "Status"), ("log", "Log")];
 
     [CascadingParameter]
     private Task<AuthenticationState> AuthState { get; set; } = default!;
@@ -105,7 +114,10 @@ else
         catch (JSException) { }
     }
 
-    protected override async Task OnParametersSetAsync()
+    protected override Task OnParametersSetAsync() => LoadStatsAsync();
+
+    /// <summary>The counts in the header and the open reports on the Reports tab (refreshed after each report action).</summary>
+    private async Task LoadStatsAsync()
     {
         var caller = (await AuthState).User;
         await using var scope = ScopeFactory.CreateAsyncScope();

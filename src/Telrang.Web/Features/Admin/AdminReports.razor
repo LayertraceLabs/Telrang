@@ -1,0 +1,131 @@
+@inherits AdminTabBase
+
+<h2 class="visually-hidden">Reports</h2>
+<AdminStatus Message="@StatusMessage" Ok="@StatusOk" />
+<div class="d-flex flex-wrap align-items-center gap-1 small text-secondary mb-2">
+    <span>Open reports by poll, newest first · Disabled polls · Actions</span>
+    <OptionHelp Id="report-actions" Label="Report actions">
+        <p>Visitors report a poll from its vote or results page. A report holds a category, the details and an email address
+            when the reporter gave them, and its time; no IP address, browser, voter or account. The owner never sees reports.</p>
+        <ul>
+            <li><em>Dismiss</em>: closes the poll's open reports without action and erases their details and addresses. The
+                Log tab keeps the decision.</li>
+            <li><em>Disable</em>: takes the poll down. Everyone but its owner and admins gets "This poll is unavailable."
+                (HTTP 410) on every page of it and nobody can vote. The owner sees it marked Disabled, cannot edit, reopen or
+                create invite links, can still download and delete it, and gets one mail (when mail is configured) naming the
+                poll and nothing of any report. Its open reports count as acted on and stay here with the poll.</li>
+            <li><em>Enable</em>: makes the poll available again as before; its reports are open again for a decision.</li>
+            <li><em>Delete…</em>: deletes the poll with its ballots, invite links and reports. No undo except a backup. Takes a
+                tick box.</li>
+            <li><em>Owner</em>: the owner's account on the Users tab, where it can be locked or deleted.</li>
+        </ul>
+        <p>Admins can open a disabled poll to review it: its vote page without voting, and its results only as any visitor
+            would see them.</p>
+    </OptionHelp>
+</div>
+@if (groups is null)
+{
+    <p>Loading…</p>
+}
+else if (groups.Count == 0)
+{
+    <EmptyState Text="No open reports." />
+}
+else
+{
+    <ul class="list-group admin-reports">
+        @foreach (var g in groups)
+        {
+            <li class="list-group-item" @key="g.EncodedId">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                    <div class="text-break">
+                        <a class="fw-semibold" href="p/@g.EncodedId" data-enhance-nav="false"><bdi>@g.Title</bdi></a>
+                        <div class="small text-secondary">
+                            @if (g.IsDisabled)
+                            {
+                                <span class="badge text-bg-danger me-1" title="Disabled @PollText.DateTime(g.DisabledAt!.Value)">Disabled</span>
+                            }
+                            @Count(g.Open.Count, "open report", "open reports")
+                            @if (g.ActedCount > 0)
+                            {
+                                <span> · <abbr title="Reports that the disabling acted on; open again when the poll is enabled">@Count(g.ActedCount, "acted on", "acted on")</abbr></span>
+                            }
+                            · by @g.OwnerEmail · <a href="admin?user=@Uri.EscapeDataString(g.OwnerId)">Owner</a>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        @if (g.Open.Count > 0)
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.DismissReportsAsync(c, g.EncodedId))">Dismiss</button>
+                        }
+                        @if (g.IsDisabled)
+                        {
+                            <button class="btn btn-sm btn-outline-success" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.EnablePollAsync(c, g.EncodedId))">Enable</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-danger" disabled="@Busy" @onclick="() => RunAsync((a, c) => a.DisablePollAsync(c, g.EncodedId))">Disable</button>
+                        }
+                        @if (confirming != g.EncodedId)
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => confirming = g.EncodedId">Delete…</button>
+                        }
+                    </div>
+                </div>
+                @if (confirming == g.EncodedId)
+                {
+                    <AdminConfirm Id="@("confirm-report-delete-" + g.EncodedId)" Text="@($"Delete “{g.Title}” with its ballots, invite links and reports.")"
+                                  Action="Delete poll" Busy="Busy" OnConfirm="() => RunAsync((a, c) => a.DeletePollAsync(c, g.EncodedId))"
+                                  OnCancel="() => confirming = null" />
+                }
+                @if (g.Open.Count > 0)
+                {
+                    <div class="table-responsive mt-2">
+                        <table class="table table-sm align-top mb-0 report-table">
+                            <thead>
+                                <tr>
+                                    <th><abbr title="Chosen by the reporter">Category</abbr></th>
+                                    <th><abbr title="When the report was sent (UTC)">Received</abbr></th>
+                                    <th><abbr title="What the reporter typed, as plain text; empty when nothing was typed">Details</abbr></th>
+                                    <th><abbr title="The address the reporter typed, unverified; empty when none was given">Contact</abbr></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in g.Open)
+                                {
+                                    <tr @key="r.Id">
+                                        <td class="text-nowrap">@ReportService.Label(r.Category)</td>
+                                        <td class="text-nowrap">@PollText.DateTime(r.CreatedAt)</td>
+                                        <td class="text-break report-text"><bdi>@r.Text</bdi></td>
+                                        <td class="text-break"><bdi>@r.Contact</bdi></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    /// <summary>Raised after every action, so the page can update the count on the tab.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private List<AdminReportGroup>? groups;
+    private string? confirming;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override async Task OnActionDoneAsync()
+    {
+        confirming = null;
+        await LoadAsync();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task LoadAsync() => groups = (await WithAdminAsync((a, c) => a.ListReportsAsync(c)))?.ToList();
+
+    private static string Count(int n, string one, string many) => $"{n} {(n == 1 ? one : many)}";
+}

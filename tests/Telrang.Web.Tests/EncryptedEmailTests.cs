@@ -97,6 +97,12 @@ public class EncryptedEmailTests
             Assert.NotNull(await accounts.RequestEmailChangeAsync(target, "target.new@example.com"));
             return 0;
         });
+        // DESIGN.md §34.8: a report's details and contact are ciphertext; so are the acted-on ones kept with a disabled poll.
+        Assert.Equal(Telrang.Web.Features.Reports.ReportStatus.Sent, (await WithScope(factory, sp => sp.GetRequiredService<Telrang.Web.Features.Reports.ReportService>()
+            .SubmitAsync(survey, null, ReportCategory.Abuse, "It names reported.person@example.com", "reporter@example.com"))).Status);
+        Assert.Equal(Telrang.Web.Features.Reports.ReportStatus.Sent, (await WithScope(factory, sp => sp.GetRequiredService<Telrang.Web.Features.Reports.ReportService>()
+            .SubmitAsync(survey2, ownerId, ReportCategory.Other, "write to other.reporter@example.com", "other.reporter@example.com"))).Status);
+        Assert.True((await WithScope(factory, sp => AdminOf(sp).DisablePollAsync(admin, survey2))).Ok);
         Assert.True((await WithScope(factory, sp => AdminOf(sp).InviteAsync(admin, "invited@example.com"))).Ok);
         Assert.True((await WithScope(factory, sp => AdminOf(sp).TransferPollAsync(admin, poll, "TARGET@example.com"))).Ok);
         Assert.True((await WithScope(factory, sp => AdminOf(sp).AddBlockAsync(admin, "self@example.com", 5, "note"))).Ok);

@@ -70,8 +70,8 @@
     <div class="mb-3 option-field">
         <label for="setting-legal" class="form-label">About / privacy page (Markdown)</label>
         <OptionHelp Label="About / privacy page">
-            <p>Shown at <a href="about">/about</a>. While it is not empty, the footer of every page links to it as "About and
-                privacy" and the cookie note on the vote page links to it; empty, /about returns 404.</p>
+            <p>Shown at <a href="about">/about</a>. While it (or the report contact) is not empty, the footer of every page links
+                to it as "About and privacy" and the cookie note on the vote page links to it; both empty, /about returns 404.</p>
             <p>Markdown with HTML disabled. The place for the operator, a contact and the privacy notes: the cookies used, what
                 mail is sent, and the captcha provider when one is enabled.</p>
         </OptionHelp>
@@ -106,6 +106,27 @@
             <p>Off: every poll shows the site's theme, the editor has no Look tab, and the looks stored with polls are kept
                 but not shown until this is on again. Owners' saved looks stay on their Looks page.</p>
         </OptionHelp>
+    </div>
+    <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" role="switch" id="setting-reports" @bind="reports" />
+        <label class="form-check-label" for="setting-reports">Reports</label>
+        <OptionHelp Label="Reports">
+            <p>Visitors may report a poll from a "Report" link on its vote and results pages: a category, optional details (at most
+                @PollReport.MaxTextLength characters) and an optional email address. Admins see them on the Reports tab. No IP address, browser or
+                account is stored with a report; the details and the address are stored encrypted. On by default.</p>
+            <p>At most @ReportService.MaxOpenPerPoll open reports per poll and @ReportService.MaxOpen in all are kept; further ones are accepted and not stored. The admins are
+                mailed when a poll gets its first open report (when mail is configured), at most once an hour.</p>
+            <p>Off: no link, the form answers 404, and stored reports stay on the Reports tab.</p>
+        </OptionHelp>
+    </div>
+    <div class="mb-3 option-field">
+        <label for="setting-reportsContact" class="form-label">Report contact</label>
+        <OptionHelp Label="Report contact">
+            <p>One line on the About page (<a href="about">/about</a>), such as an address for notices about content: plain text,
+                at most @AppSettingsSnapshot.MaxReportsContactLength characters. While it is set the About page exists even without its Markdown. Empty (the default): no
+                line.</p>
+        </OptionHelp>
+        <input id="setting-reportsContact" type="text" class="form-control" maxlength="@AppSettingsSnapshot.MaxReportsContactLength" @bind="reportsContact" />
     </div>
     <details class="mb-3">
         <summary>Captcha</summary>
@@ -341,6 +362,8 @@ else
     private string? welcome;
     private string? retentionDays;
     private bool pollLooks = true;
+    private bool reports = true;
+    private string? reportsContact;
     private string layout = "topbar";
     private string preset = "system";
     /// <summary>Font and the four colours (the override, else the built-in colour), in the shared look controls.</summary>
@@ -367,6 +390,8 @@ else
         (captchaProvider, captchaSiteKey, captchaHasSecret, captchaSecret) = (s.Captcha.Provider, s.Captcha.SiteKey, s.Captcha.HasSecret, null);
         welcome = s.WelcomeMarkdown;
         pollLooks = s.PollLooks;
+        reports = s.ReportsEnabled;
+        reportsContact = s.ReportsContact;
         retentionDays = s.RetentionDays > 0 ? s.RetentionDays.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
         var t = s.Theme;
         layout = t.LayoutValue;
@@ -528,6 +553,8 @@ else
             [SettingKeys.LegalPageMarkdown] = legal,
             [SettingKeys.HomeWelcomeMarkdown] = welcome,
             [SettingKeys.PollLooksEnabled] = pollLooks ? null : "false",
+            [SettingKeys.ReportsEnabled] = reports ? null : "false",
+            [SettingKeys.ReportsContact] = reportsContact,
         };
         foreach (var (key, value) in limits) values[key] = value;
         values[SettingKeys.CaptchaProvider] = captchaProvider == CaptchaProvider.None ? null : captchaProvider.ToString();

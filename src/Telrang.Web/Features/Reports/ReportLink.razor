@@ -1,0 +1,11 @@
+@inject SettingsService Settings
+@* The "Report" link of a poll page (DESIGN.md §34.8): to everyone but the owner while reports are on. A plain page load
+   (the report form is static SSR like the poll pages). *@
+@if (Settings.Current.ReportsEnabled && !Access.IsOwner)
+{
+    <p class="small text-secondary mt-4 mb-0 report-link"><a href="@ReportRoutes.For(Access.EncodedId)" data-enhance-nav="false">Report</a></p>
+}
+
+@code {
+    [Parameter, EditorRequired] public PollAccess Access { get; set; } = default!;
+}

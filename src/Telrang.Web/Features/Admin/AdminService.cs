@@ -81,7 +81,20 @@ public sealed record AdminUserList(IReadOnlyList<AdminUserRow> Rows, int Total)
     public bool Truncated => Total > Rows.Count;
 }
 
-public sealed record AdminStats(int Users, int Polls, int OpenPolls, int Ballots);
+public sealed record AdminStats(int Users, int Polls, int OpenPolls, int Ballots, int OpenReports = 0);
+
+/// <summary>One open report on the Reports tab (DESIGN.md §34.8), text and contact decrypted (null = none given).</summary>
+public sealed record AdminReportRow(Guid Id, ReportCategory Category, DateTimeOffset CreatedAt, string? Text, string? Contact);
+
+/// <summary>
+/// A poll on the Reports tab: its open reports (newest first), or none while it is disabled with the reports acted on
+/// (<paramref name="ActedCount"/>), so it can be enabled from there.
+/// </summary>
+public sealed record AdminReportGroup(string EncodedId, string Title, string OwnerId, string OwnerEmail, DateTimeOffset? DisabledAt,
+    IReadOnlyList<AdminReportRow> Open, int ActedCount)
+{
+    public bool IsDisabled => DisabledAt is not null;
+}
 
 /// <summary>Outcome of an admin action: <see cref="Ok"/> false means nothing changed. <see cref="Link"/> is a one-time URL to show.</summary>
 public sealed record AdminOutcome(bool Ok, string Message, string? Link = null)
@@ -160,7 +173,8 @@ public sealed class AdminService(
         var now = time.GetUtcNow();
         var polls = await db.Polls.AsNoTracking().Select(p => new { p.ClosedAt, p.ClosesAt }).ToListAsync(ct);
         return new AdminStats(await db.Users.CountAsync(u => u.DeletedAt == null, ct), polls.Count,
-            polls.Count(p => !PollState.IsClosed(p.ClosedAt, p.ClosesAt, now)), await db.Ballots.CountAsync(ct));
+            polls.Count(p => !PollState.IsClosed(p.ClosedAt, p.ClosesAt, now)), await db.Ballots.CountAsync(ct),
+            await db.PollReports.CountAsync(r => r.State == ReportState.Open, ct));
     }
 
     // ---- polls ----------------------------------------------------------------------------------
@@ -207,6 +221,62 @@ public sealed class AdminService(
         await tx.CommitAsync(ct);
         notifier.End(poll.Id);
         return new AdminOutcome(true, $"Deleted “{poll.Title}”.");
+    }
+
+    // ---- reports (DESIGN.md §34.8) -------------------------------------------------------------
+
+    /// <summary>
+    /// The Reports tab: every poll with open reports (the newest report first), then the disabled polls without any. The text
+    /// and contact of each open report are decrypted for the admin; nothing identifies a reporter beyond what they typed.
+    /// </summary>
+    public async Task<IReadOnlyList<AdminReportGroup>?> ListReportsAsync(ClaimsPrincipal caller, CancellationToken ct = default)
+    {
+        if (!await IsAdminAsync(caller)) return null;
+        var reports = await db.PollReports.AsNoTracking().Where(r => r.State == ReportState.Open)
+            .Select(r => new { r.Id, r.PollId, r.Category, r.CreatedAt, r.TextCipher, r.ContactCipher }).ToListAsync(ct);
+        var reportedIds = reports.Select(r => r.PollId).Distinct().ToList();
+        var polls = await db.Polls.AsNoTracking().Where(p => reportedIds.Contains(p.Id) || p.DisabledAt != null)
+            .Select(p => new { p.Id, p.Title, p.OwnerId, OwnerEmail = p.Owner!.Email, p.DisabledAt }).ToListAsync(ct);
+        var pollIds = polls.Select(p => p.Id).ToList();
+        var acted = (await db.PollReports.AsNoTracking().Where(r => r.State == ReportState.Acted && pollIds.Contains(r.PollId))
+                .Select(r => r.PollId).ToListAsync(ct))
+            .CountBy(id => id).ToDictionary(x => x.Key, x => x.Value);
+        var byPoll = reports.ToLookup(r => r.PollId);
+        // DateTimeOffset ordering in memory: SQLite cannot ORDER BY it.
+        return polls.Select(p => new AdminReportGroup(PollId.Encode(p.Id), p.Title, p.OwnerId, emails.Display(p.OwnerEmail) ?? "(no email)",
+                p.DisabledAt,
+                byPoll[p.Id].OrderByDescending(r => r.CreatedAt)
+                    .Select(r => new AdminReportRow(r.Id, r.Category, r.CreatedAt, ReportText(r.TextCipher), ReportText(r.ContactCipher))).ToList(),
+                acted.GetValueOrDefault(p.Id)))
+            .OrderByDescending(g => g.Open.Count > 0)
+            .ThenByDescending(g => g.Open.Count > 0 ? g.Open[0].CreatedAt : g.DisabledAt)
+            .ToList();
+    }
+
+    /// <summary>A report's stored text or contact, decrypted; a value the key ring cannot open shows as unreadable.</summary>
+    private string? ReportText(string? cipher) => cipher is null ? null : emails.Reveal(cipher) ?? "(unreadable)";
+
+    /// <summary>
+    /// Closes the poll's open reports without action (<see cref="ReportState.Dismissed"/>, pointing at this log entry) and erases
+    /// their text and contact: nothing a reporter typed is kept once the decision is made.
+    /// </summary>
+    public async Task<AdminOutcome> DismissReportsAsync(ClaimsPrincipal caller, string encodedId, CancellationToken ct = default)
+    {
+        if (!await IsAdminAsync(caller)) return AdminOutcome.Denied;
+        await using var tx = await db.Database.BeginWriteAsync(ct);
+        var poll = await access.GetForAdminAsync(db, encodedId, tracking: false, ct);
+        if (poll is null) return AdminOutcome.NotFound;
+        var pollId = poll.Id;
+        var open = await db.PollReports.CountAsync(r => r.PollId == pollId && r.State == ReportState.Open, ct);
+        if (open == 0) return new AdminOutcome(false, $"“{poll.Title}” has no open reports.");
+        var now = time.GetUtcNow();
+        var logId = await LogAsync(caller, "reports.dismiss", "poll", encodedId, $"{poll.Title}: {open} {(open == 1 ? "report" : "reports")}");
+        await db.PollReports.Where(r => r.PollId == pollId && r.State == ReportState.Open)
+            .ExecuteUpdateAsync(u => u.SetProperty(r => r.State, ReportState.Dismissed).SetProperty(r => r.HandledAt, now)
+                .SetProperty(r => r.HandledLogId, logId).SetProperty(r => r.TextCipher, (string?)null)
+                .SetProperty(r => r.ContactCipher, (string?)null), ct);
+        await tx.CommitAsync(ct);
+        return new AdminOutcome(true, open == 1 ? $"Dismissed the report of “{poll.Title}”." : $"Dismissed {open} reports of “{poll.Title}”.");
     }
 
     /// <summary>
@@ -322,10 +392,13 @@ public sealed class AdminService(
     /// there is no substring search on them); empty = all. Pending ones first, then by email; at most
     /// <paramref name="max"/> rows plus the total match count.
     /// </summary>
-    public async Task<AdminUserList?> SearchUsersAsync(ClaimsPrincipal caller, string? query, int max = MaxUserRows, CancellationToken ct = default)
+    /// <param name="userId">Only this account (the Reports tab's link to a poll's owner, <c>admin?user=</c>, DESIGN.md §34.8).</param>
+    public async Task<AdminUserList?> SearchUsersAsync(ClaimsPrincipal caller, string? query, int max = MaxUserRows, CancellationToken ct = default,
+        string? userId = null)
     {
         if (!await IsAdminAsync(caller)) return null;
         var filtered = db.Users.AsNoTracking().Where(u => u.DeletedAt == null);
+        if (userId is not null) filtered = filtered.Where(u => u.Id == userId);
         if (query?.Trim() is { Length: > 0 } q)
         {
             if (q.Length > 256) q = q[..256];
@@ -683,6 +756,10 @@ public sealed class AdminService(
         if (LimitProblem(values) is { } limitProblem) return new AdminOutcome(false, limitProblem);
         if (values.TryGetValue(SettingKeys.PollLooksEnabled, out var looks) && !string.IsNullOrWhiteSpace(looks) && !bool.TryParse(looks.Trim(), out _))
             return new AdminOutcome(false, "Poll looks: true or false.");
+        if (values.TryGetValue(SettingKeys.ReportsEnabled, out var reports) && !string.IsNullOrWhiteSpace(reports) && !bool.TryParse(reports.Trim(), out _))
+            return new AdminOutcome(false, "Reports: true or false.");
+        if (values.TryGetValue(SettingKeys.ReportsContact, out var contact) && contact?.Trim() is { Length: > AppSettingsSnapshot.MaxReportsContactLength })
+            return new AdminOutcome(false, $"Report contact: at most {AppSettingsSnapshot.MaxReportsContactLength} characters.");
         if (values.TryGetValue(SettingKeys.PublicUrl, out var publicUrl) && SettingsService.PublicUrlProblem(publicUrl) is { } urlProblem)
             return new AdminOutcome(false, urlProblem);
         (var mailProblem, values) = BindMailCredential(values);

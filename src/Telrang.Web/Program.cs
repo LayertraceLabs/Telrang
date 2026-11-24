@@ -256,6 +256,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<PollSweepService>(
 builder.Services.AddScoped<CsvExportService>();
 builder.Services.AddScoped<AdminBootstrapper>();
 builder.Services.AddScoped<AdminService>();
+builder.Services.AddScoped<Telrang.Web.Features.Reports.ReportService>(); // poll reports (DESIGN.md §34.8)
+builder.Services.AddSingleton<Telrang.Web.Features.Reports.ReportMailGate>();
 builder.Services.AddScoped<StatusService>();
 
 // ---- Live results for the owner (DESIGN.md §21.2); memory only ---------------------------------

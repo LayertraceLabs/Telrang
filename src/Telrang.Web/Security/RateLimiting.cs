@@ -4,7 +4,8 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace Telrang.Web.Security;
 
 /// <summary>
-/// Per-IP sliding-window limits: the vote page POSTs (DESIGN.md §21.1), the sensitive account POSTs, page GETs
+/// Per-IP sliding-window limits: the vote page POSTs (DESIGN.md §21.1), the report form (§34.8,
+/// <c>RateLimiting:ReportPermitPerMinute</c>, default 3), the sensitive account POSTs, page GETs
 /// (DESIGN.md §31, pentest R3-RES-6: <c>RateLimiting:PageGetsPerMinute</c>, default 600 per client key, 0 = off; static
 /// files, branding, the Blazor and health endpoints are not counted) and every other POST
 /// (<c>RateLimiting:OtherPostsPerMinute</c>, default 120 per client key, 0 = off; not the Blazor hub). The Identity pages are all served by the single
@@ -54,6 +55,7 @@ public static class RateLimiting
         var votePerMinute = config.GetValue("RateLimiting:VotePermitPerMinute", 120);
         var pageGetsPerMinute = config.GetValue("RateLimiting:PageGetsPerMinute", 600);
         var otherPostsPerMinute = config.GetValue("RateLimiting:OtherPostsPerMinute", 120);
+        var reportPerMinute = config.GetValue("RateLimiting:ReportPermitPerMinute", 3);
 
         services.AddRateLimiter(options =>
         {
@@ -77,6 +79,9 @@ public static class RateLimiting
             {
                 // Every partition per IPv6 /48 like the abuse tracker (pentest R2-VOTE-1): a /64 each would let one /48
                 // multiply the limit.
+                // The report form (DESIGN.md §34.8): its own partition, a few a minute; over it is an abuse signal like the
+                // account forms (one person reports a poll, not dozens).
+                if (IsReportPost(ctx)) return SlidingWindow("report:" + ClientKeys.ForAbuse(ctx), reportPerMinute);
                 if (IsVotePost(ctx)) return SlidingWindow("vote:" + ClientKeys.ForAbuse(ctx), votePerMinute);
                 if (IsSetupPost(ctx)) return SlidingWindow("setup:" + ClientKeys.ForAbuse(ctx), setupPerMinute);
                 if (IsAuthPost(ctx)) return SlidingWindow("auth:" + ClientKeys.ForAbuse(ctx), authPerMinute);
@@ -118,7 +123,7 @@ public static class RateLimiting
     {
         var method = ctx.Request.Method;
         if (HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method) || HttpMethods.IsTrace(method)) return false;
-        return !IsVotePost(ctx) && !IsSetupPost(ctx) && !IsAuthPost(ctx) && !RequestLimits.IsHub(ctx);
+        return !IsVotePost(ctx) && !IsReportPost(ctx) && !IsSetupPost(ctx) && !IsAuthPost(ctx) && !RequestLimits.IsHub(ctx);
     }
 
     /// <summary>A POST to <c>/setup</c> or <c>/setup/recover</c>.</summary>
@@ -131,8 +136,12 @@ public static class RateLimiting
 
     private static string TrimmedPath(HttpContext ctx) => ctx.Request.Path.Value?.TrimEnd('/') ?? "";
 
-    /// <summary>Every POST under <c>/p/</c> (the vote page's forms).</summary>
-    internal static bool IsVotePost(HttpContext ctx) => HttpMethods.IsPost(ctx.Request.Method) && ctx.Request.Path.StartsWithSegments("/p");
+    /// <summary>Every POST under <c>/p/</c> but the report form (the vote and results pages' forms).</summary>
+    internal static bool IsVotePost(HttpContext ctx) => HttpMethods.IsPost(ctx.Request.Method) && ctx.Request.Path.StartsWithSegments("/p")
+        && !Features.Reports.ReportRoutes.IsReportPath(ctx.Request.Path);
+
+    /// <summary>A POST of the report form, <c>/p/{id}/report</c> (DESIGN.md §34.8).</summary>
+    internal static bool IsReportPost(HttpContext ctx) => HttpMethods.IsPost(ctx.Request.Method) && Features.Reports.ReportRoutes.IsReportPath(ctx.Request.Path);
 
     private static RateLimitPartition<string> SlidingWindow(string key, int permitPerMinute) =>
         RateLimitPartition.GetSlidingWindowLimiter(key, _ => new SlidingWindowRateLimiterOptions

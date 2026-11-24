@@ -10,13 +10,24 @@
 {
     <div class="legal-page">@MarkdownRenderer.Render(markdown, MarkdownRenderer.AdminMaxLength)</div>
 }
+@if (contact is not null)
+{
+    @* DESIGN.md §34.8: the admin's contact line for reports, plain text. *@
+    <p class="legal-report-contact">Reports · <bdi>@contact</bdi></p>
+}
 
 @code {
-    private string? markdown;
+    private string? markdown, contact;
 
     protected override void OnInitialized()
     {
-        markdown = Settings.Current.LegalPageMarkdown;
-        if (markdown is null) Nav.NotFound();
+        var s = Settings.Current;
+        if (!s.HasLegalPage)
+        {
+            Nav.NotFound();
+            return;
+        }
+        markdown = s.LegalPageMarkdown;
+        contact = s.ReportsContact;
     }
 }
