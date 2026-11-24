@@ -1,11 +1,14 @@
+using Microsoft.Extensions.DependencyInjection;
 using Telrang.Core.Polls;
 using Telrang.Web.Features.Polls;
+using static Telrang.Web.Tests.TestUtil;
 
 namespace Telrang.Web.Tests;
 
 /// <summary>
-/// DESIGN.md §34 step 1 lets Core hold several questions, pages, groups and the new types; the app does not offer them until
-/// the vote page and the editor do (step 2), so <see cref="PollParsing.Validate"/> refuses them.
+/// DESIGN.md §34 step 1 lets Core hold several questions, pages, groups and the new types; the vote page takes them since
+/// step 2, the editor and the results not yet, so <see cref="PollParsing.Validate"/> refuses them unless the temporary switch
+/// <see cref="PollParsing.TemporaryStructuredPollsSwitch"/> is on (tests and e2e; removed in step 4).
 /// </summary>
 public class MultiQuestionGateTests
 {
@@ -63,5 +66,22 @@ public class MultiQuestionGateTests
         });
         Assert.Contains(errors, e => e.Field == "pages");
         Assert.Contains(errors, e => e.Field == "groups");
+    }
+
+    [Fact]
+    public void The_temporary_switch_lets_them_through()
+    {
+        Assert.True(PollParsing.Validate(MultiPageVoteTests.Survey(), PollLimits.Default, allowStructured: true).Success);
+        Assert.True(PollParsing.Validate(new PollDraft { Title = "T", Questions = [Q(PollType.Number)] }, PollLimits.Default, allowStructured: true).Success);
+    }
+
+    [Fact]
+    public async Task A_normal_instance_cannot_create_them()
+    {
+        await using var factory = new AppFactory(new Dictionary<string, string?> { [PollParsing.TemporaryStructuredPollsSwitch] = "false" });
+        var owner = await CreateUserAsync(factory, "o@example.com");
+        var result = await WithScope(factory, sp => sp.GetRequiredService<PollService>().CreatePollAsync(owner, MultiPageVoteTests.Survey()));
+        Assert.Equal(PollSaveStatus.Invalid, result.Status);
+        Assert.Contains(result.Errors, e => e.Field == "questions");
     }
 }

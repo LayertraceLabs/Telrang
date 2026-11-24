@@ -205,7 +205,11 @@ public sealed partial class PollEditor : IAsyncDisposable
             draftModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/draft.js");
             var stored = await draftModule.InvokeAsync<string?>("attach", DraftKey, lastJson, ReplaceDraft);
             if (stored is null) return;
-            if (PollJson.DeserializeDraft(stored) is { Questions.Count: 1 } restoredDraft
+            // TEMPORARY (§34 step 2, remove in step 4): with the structured-polls switch on, a new poll's browser draft may hold
+            // several questions, pages and groups (the editor shows the first question; Create saves the whole draft), so the
+            // browser smoke tests can create such polls before the editor can.
+            if (PollJson.DeserializeDraft(stored) is { } restoredDraft
+                && (restoredDraft.Questions.Count == 1 || (Existing is null && Polls.AllowStructured))
                 && (Existing is null || restoredDraft.Questions[0].Type == Existing.Questions[0].Type)
                 && DraftFits(restoredDraft, Polls.CurrentLimits))
             {
@@ -301,7 +305,7 @@ public sealed partial class PollEditor : IAsyncDisposable
     // ---- change handling ----
 
     private void Validate() =>
-        result = PollParsing.Validate(draft, Polls.CurrentLimits, MaxDurationDays, CreatedAt ?? Time.GetUtcNow(), Existing);
+        result = PollParsing.Validate(draft, Polls.CurrentLimits, MaxDurationDays, CreatedAt ?? Time.GetUtcNow(), Existing, Polls.AllowStructured);
 
     /// <summary>After every edit: cut oversized text, mark the field touched, revalidate, tell the page, keep the browser draft.</summary>
     private async Task ChangedAsync(string field)

@@ -98,6 +98,8 @@ public sealed partial class AppFactory(IReadOnlyDictionary<string, string?>? ove
         builder.UseSetting("Polls:BackgroundSweep", "false"); // tests call PollSweepService directly
         // Tests post forms right after loading them; the 2 s minimum has its own test (Phase5b2Tests).
         builder.UseSetting("Abuse:FormMinSeconds", "0");
+        // TEMPORARY (DESIGN.md §34 step 2, remove in step 4): tests create polls with several questions, pages and the new types.
+        builder.UseSetting(Telrang.Web.Features.Polls.PollParsing.TemporaryStructuredPollsSwitch, "true");
         foreach (var (key, value) in overrides ?? new Dictionary<string, string?>())
         {
             builder.UseSetting(key, value);
