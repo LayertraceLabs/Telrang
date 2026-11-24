@@ -1,9 +1,12 @@
 @* Choice question fields inside the static vote form (DESIGN.md §34.3, §34.4). One field name (c) for every
    display: a radio group (max 1), checkboxes (more) or a dropdown (max 1), the option key as value and Other as
-   "_other" with its text in a field of its own. Works without JS; BallotValidator on the server stays authoritative. *@
+   "_other" with its text in a field of its own. Works without JS; BallotValidator on the server stays authoritative.
+   "Required" is the HTML required of a radio group or dropdown (one pick satisfies it); checkboxes cannot say "at least
+   one" in HTML, so there only the server checks. *@
 @if (Question.Display == ChoiceDisplay.Dropdown && Question.MaxSelect == 1)
 {
-    <select class="form-select choice-select" id="@Values.Id("choice")" name="@Values.FieldName(BallotForm.ChoiceField)" aria-label="@Label">
+    <select class="form-select choice-select" id="@Values.Id("choice")" name="@Values.FieldName(BallotForm.ChoiceField)" aria-label="@Label"
+            required="@Question.Required">
         <option value="" selected="@(Values.Picked.Count == 0 && !Values.OtherPicked)">—</option>
         @foreach (var o in Question.Options)
         {
@@ -24,7 +27,7 @@ else
             var id = Values.Id("c-" + o.Key);
             <li class="form-check choice-option" @key="o.Key">
                 <input class="form-check-input" type="@type" id="@id" name="@Values.FieldName(BallotForm.ChoiceField)" value="@o.Key"
-                       checked="@Values.Picked.Contains(o.Key)" />
+                       checked="@Values.Picked.Contains(o.Key)" required="@RadioRequired" />
                 <label class="form-check-label text-break" for="@id">@o.Label</label>
                 @if (!string.IsNullOrWhiteSpace(o.DescriptionMarkdown))
                 {
@@ -36,7 +39,7 @@ else
         {
             <li class="form-check choice-option">
                 <input class="form-check-input" type="@type" id="@Values.Id("c-other")" name="@Values.FieldName(BallotForm.ChoiceField)"
-                       value="@BallotForm.OtherValue" checked="@Values.OtherPicked" />
+                       value="@BallotForm.OtherValue" checked="@Values.OtherPicked" required="@RadioRequired" />
                 <label class="form-check-label" for="@Values.Id("c-other")">Other</label>
             </li>
         }
@@ -56,4 +59,6 @@ else
     [Parameter] public string Label { get; set; } = "";
     /// <summary>The admin's limit for one text answer (the Other text).</summary>
     [Parameter] public int TextMax { get; set; } = PollLimits.Default.TextAnswerMax;
+
+    private bool RadioRequired => Question.Required && Question.MaxSelect == 1;
 }
