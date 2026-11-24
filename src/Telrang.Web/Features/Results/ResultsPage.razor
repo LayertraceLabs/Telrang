@@ -98,42 +98,64 @@
         </div>
         @if (ballots is { } t)
         {
-            @switch (d.Questions[0].Type)
+            @if (t.Responses is { } responses)
             {
-                case PollType.Ranked:
-                case PollType.Points:
-                    <BallotsView Definition="d" Table="t" BaseHref="@BallotsHref" />
-                    break;
-                case PollType.Dates:
-                    <DatesGridView Definition="d" Rows="t.Dates!" Window="t.Window" BaseHref="@BallotsHref" />
-                    break;
-                case PollType.Choice:
-                case PollType.Text:
-                case PollType.Number:
-                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 3
-                default:
-                    throw new InvalidOperationException($"No ballots view for poll type {d.Questions[0].Type}.");
+                <ResponsesView Definition="d" Table="responses" Window="t.Window" BaseHref="@BallotsHref" />
             }
+            else
+            {
+                @switch (d.Questions[0].Type)
+                {
+                    case PollType.Ranked:
+                    case PollType.Points:
+                        <BallotsView Definition="d" Table="t" BaseHref="@BallotsHref" />
+                        break;
+                    case PollType.Dates:
+                        <DatesGridView Definition="d" Rows="t.Dates!" Window="t.Window" BaseHref="@BallotsHref" />
+                        break;
+                    case PollType.Choice:
+                    case PollType.Text:
+                    case PollType.Number:
+                        throw new System.Diagnostics.UnreachableException("These types have a response table.");
+                    default:
+                        throw new InvalidOperationException($"No ballots view for poll type {d.Questions[0].Type}.");
+                }
+            }
+        }
+        else if (VoteLayout.IsSimple(d))
+        {
+            @* A simple poll: its question's view without a heading (the poll title is the question), as before §34. *@
+            <QuestionResults Definition="d" Result="r.Questions[0]" Texts="TextsOf(d.Questions[0])" PageHref="@PageHref" />
         }
         else
         {
-            @switch (d.Questions[0].Type)
+            @* DESIGN.md §34.5: one section per question under its page and group headings. *@
+            @foreach (var pg in VoteLayout.Pages(d))
             {
-                case PollType.Ranked when r.Ranked is not null:
-                    <RankedResultsView Definition="d" Results="r.Ranked" />
-                    break;
-                case PollType.Points when r.Points is not null:
-                    <PointsResultsView Definition="d" Results="r.Points" Distribution="r.PointsDistribution" />
-                    break;
-                case PollType.Dates when r.Dates is not null:
-                    <DatesResultsView Definition="d" Results="r.Dates" />
-                    break;
-                case PollType.Choice:
-                case PollType.Text:
-                case PollType.Number:
-                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 3
-                default:
-                    throw new InvalidOperationException($"No results for poll type {d.Questions[0].Type}.");
+                @if (pg.Page is { Title.Length: > 0 } pp)
+                {
+                    <h2 class="h4 text-break mt-4 mb-3 results-page-title" @key="pp.Key">@pp.Title</h2>
+                }
+                @foreach (var block in pg.Blocks)
+                {
+                    @if (block.Group is { } g)
+                    {
+                        <section class="results-group mb-4" @key="g.Key" aria-labelledby="group-@g.Key">
+                            <h3 class="h5 text-break" id="group-@g.Key">@g.Title</h3>
+                            @foreach (var q in block.Questions)
+                            {
+                                @Section(d, r, q, true)
+                            }
+                        </section>
+                    }
+                    else
+                    {
+                        @foreach (var q in block.Questions)
+                        {
+                            @Section(d, r, q, false)
+                        }
+                    }
+                }
             }
         }
     }
@@ -169,6 +191,9 @@
     /// <summary><c>ballots</c> for the ballots view (DESIGN.md §33); anything else, or a viewer it refuses, is the summary.</summary>
     [SupplyParameterFromQuery(Name = ResultsQuery.View)] public string? View { get; set; }
 
+    /// <summary>The question whose free text <c>rows</c> pages (the owner's summary, DESIGN.md §34.3).</summary>
+    [SupplyParameterFromQuery(Name = ResultsQuery.Texts)] public string? TextsKey { get; set; }
+
     public const string CloseForm = "close", ReopenForm = "reopen";
 
     private PollAccess? access;
@@ -179,9 +204,17 @@
     private string FormAction => $"p/{access?.EncodedId ?? Id}/results";
     private PollResults? results;
     private BallotTable? ballots;
+    private IReadOnlyList<TextAnswers> texts = [];
+    private string PageHref => $"p/{access?.EncodedId ?? Id}/results";
+
+    /// <summary>The owner's free text page of <paramref name="q"/>; null for everyone else (TextsAsync returns nothing to them).</summary>
+    private TextAnswers? TextsOf(PollQuestion q) => texts.FirstOrDefault(t => t.Question.Key == q.Key);
     private string BallotsHref => $"p/{access?.EncodedId ?? Id}/results?{ResultsQuery.View}={ResultsQuery.BallotsView}";
-    private string RefreshHref => ballots is null ? $"p/{access?.EncodedId ?? Id}/results"
-        : ballots.Window.Page == 1 ? BallotsHref : $"{BallotsHref}&{ResultsQuery.Rows}={ballots.Window.Page}";
+    private string RefreshHref => ballots is not null
+        ? ballots.Window.Page == 1 ? BallotsHref : $"{BallotsHref}&{ResultsQuery.Rows}={ballots.Window.Page}"
+        : texts.FirstOrDefault(t => t.Question.Key == TextsKey) is { Window.Page: > 1 } paged
+            ? $"{PageHref}?{ResultsQuery.Texts}={paged.Question.Key}&{ResultsQuery.Rows}={paged.Window.Page}"
+            : PageHref;
     private ChangeLogPage changes = ChangeLogPage.Empty;
     private DateTimeOffset computedAt;
     private string zone = PollTime.Utc;
@@ -199,11 +232,39 @@
         changes = await Polls.ListChangesAsync(access, Http.RequestAborted);
         if (!access.CanSeeResults) { Http.Response.StatusCode = StatusCodes.Status403Forbidden; return; }
         var computed = await ResultsService.ComputeAsync(access, Http.RequestAborted);
+        BallotTable? table = null;
+        IReadOnlyList<TextAnswers> owned = [];
         if (string.Equals(View, ResultsQuery.BallotsView, StringComparison.Ordinal))
-            ballots = await ResultsService.BallotsAsync(access, RowsPage, Http.RequestAborted);
+            table = await ResultsService.BallotsAsync(access, RowsPage, Http.RequestAborted);
+        // Free text: the owner's only (TextsAsync is empty for anyone else), on the summary.
+        if (table is null && access.IsOwner)
+            owned = await ResultsService.TextsAsync(access, TextsKey, RowsPage, Http.RequestAborted);
+        ballots = table;
+        texts = owned;
         results = computed;
         computedAt = Time.GetUtcNow();
     }
+
+    /// <summary>One question's section of a structured poll: its prompt, how many answered, and its results.</summary>
+    private RenderFragment Section(PollDefinition d, PollResults r, PollQuestion q, bool inGroup) => __builder =>
+    {
+        var result = r.Questions.First(x => x.Question.Key == q.Key);
+        <section class="results-question mb-4" id="question-@q.Key" @key="q.Key">
+            @if (inGroup)
+            {
+                <h4 class="h6 text-break mb-1"><bdi>@BallotService.QuestionLabel(d, q)</bdi></h4>
+            }
+            else
+            {
+                <h3 class="h5 text-break mb-1"><bdi>@BallotService.QuestionLabel(d, q)</bdi></h3>
+            }
+            @if (q.Type is PollType.Ranked or PollType.Points or PollType.Dates)
+            {
+                <p class="small text-secondary mb-2">@PollText.AnswersText(result.AnsweredCount)</p>
+            }
+            <QuestionResults Definition="d" Result="result" Texts="TextsOf(q)" PageHref="@PageHref" />
+        </section>
+    };
 
     private Task CloseAsync() => SetClosedAsync(true);
 

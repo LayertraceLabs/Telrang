@@ -1,0 +1,31 @@
+@* The owner's free text of one question (DESIGN.md §34.3): a text question's answers or a choice question's Other texts,
+   one page (RowWindow) in submission order, plain text in <bdi> (never Markdown). Only ever rendered from
+   ResultsService.TextsAsync, which returns nothing to anyone but the owner. *@
+<div class="free-text-answers" id="@Anchor">
+    <p class="small fw-semibold mb-1">@(Answers.Other ? "Other answers" : "Answers")</p>
+    <RowsPager Window="Answers.Window" BaseHref="@BaseHref" Anchor="@Anchor" Label="Answer pages" Noun="Answers" />
+    <ol class="list-unstyled free-text-list mb-2" start="@Answers.Window.First">
+        @foreach (var t in Answers.Texts)
+        {
+            <li class="free-text-item">@if (t is null)
+                {
+                    <span class="text-secondary">–</span>
+                }
+                else
+                {
+                    <bdi class="free-text">@t</bdi>
+                }</li>
+        }
+    </ol>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TextAnswers Answers { get; set; } = default!;
+
+    /// <summary>The results page's address (<c>p/{id}/results</c>), for the pager.</summary>
+    [Parameter, EditorRequired] public string PageHref { get; set; } = "";
+
+    private string Anchor => $"texts-{Answers.Question.Key}";
+
+    private string BaseHref => $"{PageHref}?{ResultsQuery.Texts}={Answers.Question.Key}";
+}

@@ -1,0 +1,33 @@
+@using Telrang.Core.Scoring
+@* Number results (DESIGN.md §34.3): count, min, max, mean, median and the distribution as the histogram of the points
+   spread (Histogram), each bar naming its range and count on hover (DESIGN.md §33). *@
+<p class="small text-secondary mb-2">@PollText.AnswersText(Results.Count)</p>
+@if (Results.Count > 0)
+{
+    <ul class="list-inline results-stats mb-2">
+        <li class="list-inline-item">Min · @Value(Results.Min, 28)</li>
+        <li class="list-inline-item">Max · @Value(Results.Max, 28)</li>
+        <li class="list-inline-item">Mean · @Value(Results.Mean, Question.Decimals + 2)</li>
+        <li class="list-inline-item">Median · @Value(Results.Median, Question.Decimals + 1)</li>
+    </ul>
+    <div class="small text-secondary"><abbr title="Answers per range of values">Spread</abbr></div>
+    @Histogram.Render(Results.Histogram.Select(b => new Histogram.Bar(b.Count, $"{Range(b)}: {PollText.VotersShare(b.Count, Results.Count)}")).ToList(),
+        string.Join(", ", Results.Histogram.Select(b => $"{Range(b)}: {b.Count} {(b.Count == 1 ? "voter" : "voters")}")), "histogram-wide")
+}
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public NumberResultSet Results { get; set; } = default!;
+
+    private string Unit => Question.Unit.Length > 0 ? " " + Question.Unit : "";
+
+    private string Value(decimal? v, int decimals) => v is { } d ? PollText.Decimal(d, decimals) + Unit : "–";
+
+    /// <summary>A bucket's values: one value for a bucket of one whole number (or all answers equal), else from–to.</summary>
+    private string Range(NumberBucket b)
+    {
+        var from = PollText.Decimal(b.From, Question.Decimals + 2);
+        var single = b.From == b.To || (Question.Decimals == 0 && b.To == b.From + 1 && Results.Histogram.All(x => x.To == x.From + 1));
+        return (single ? from : $"{from}–{PollText.Decimal(b.To, Question.Decimals + 2)}") + Unit;
+    }
+}

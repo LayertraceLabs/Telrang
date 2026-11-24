@@ -105,8 +105,12 @@ public static class PollJson
     public static ChoiceBallot DeserializeChoice(string json, string questionKey)
     {
         using var doc = JsonDocument.Parse(json);
-        if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty(questionKey, out var part)
-            || part.ValueKind != JsonValueKind.Object) return new ChoiceBallot([]);
+        return TryPart(doc.RootElement, questionKey, out var part) ? ChoiceFrom(part) : new ChoiceBallot([]);
+    }
+
+    /// <summary>A choice part already found (<see cref="TryPart"/>): the keys (strings only) and the Other flag.</summary>
+    public static ChoiceBallot ChoiceFrom(JsonElement part)
+    {
         var keys = new List<string>();
         if (part.TryGetProperty("keys", out var k) && k.ValueKind == JsonValueKind.Array)
             foreach (var e in k.EnumerateArray())
@@ -119,9 +123,13 @@ public static class PollJson
     public static NumberBallot? DeserializeNumber(string json, string questionKey)
     {
         using var doc = JsonDocument.Parse(json);
-        if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty(questionKey, out var part)
-            || part.ValueKind != JsonValueKind.Object || !part.TryGetProperty("value", out var v) || v.ValueKind != JsonValueKind.String)
-            return null;
+        return TryPart(doc.RootElement, questionKey, out var part) ? NumberFrom(part) : null;
+    }
+
+    /// <summary>A number part already found (<see cref="TryPart"/>), or null when it holds no decimal string.</summary>
+    public static NumberBallot? NumberFrom(JsonElement part)
+    {
+        if (!part.TryGetProperty("value", out var v) || v.ValueKind != JsonValueKind.String) return null;
         return decimal.TryParse(v.GetString(), System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
             System.Globalization.CultureInfo.InvariantCulture, out var d) ? new NumberBallot(d) : null;
     }
@@ -138,11 +146,23 @@ public static class PollJson
     private static T? Read<T>(string json, string questionKey) where T : class
     {
         using var doc = JsonDocument.Parse(json);
-        return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty(questionKey, out var part)
-               && part.ValueKind == JsonValueKind.Object
-            ? part.Deserialize<T>(Options)
-            : null;
+        return TryPart(doc.RootElement, questionKey, out var part) ? part.Deserialize<T>(Options) : null;
     }
+
+    // ---- one parse per payload, every question (DESIGN.md §34.5: results score all questions in one pass) ----
+
+    /// <summary>The part of <paramref name="questionKey"/> in a parsed payload: present and an object (answered).</summary>
+    public static bool TryPart(JsonElement root, string questionKey, out JsonElement part)
+    {
+        part = default;
+        return root.ValueKind == JsonValueKind.Object && root.TryGetProperty(questionKey, out part) && part.ValueKind == JsonValueKind.Object;
+    }
+
+    public static RankedBallot RankedFrom(JsonElement part) => part.Deserialize<RankedBallot>(Options) ?? new RankedBallot([], []);
+
+    public static PointsBallot PointsFrom(JsonElement part) => part.Deserialize<PointsBallot>(Options) ?? new PointsBallot(new Dictionary<string, int>());
+
+    public static DatesBallot DatesFrom(JsonElement part) => part.Deserialize<DatesBallot>(Options) ?? new DatesBallot(new Dictionary<string, Availability>());
 
     // ---- reading a question's part for display or scoring (DESIGN.md §26) ----
     // Ballots stay raw: a stored payload may name options the question no longer has. These readers drop them

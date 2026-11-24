@@ -8,12 +8,12 @@
 }
 else
 {
-    var cap = PointsBuckets.Cap(Definition);
+    var cap = PointsBuckets.Cap(Q);
     var maxTotal = Results.Rows.Count == 0 ? 0 : Results.Rows.Max(r => r.Total);
     <details class="small mb-3">
         <summary>How scoring works</summary>
         <ul class="mb-0 mt-1">
-            @foreach (var line in PollText.ScoringDetails(Definition.Questions[0]))
+            @foreach (var line in PollText.ScoringDetails(Q))
             {
                 <li>@line</li>
             }
@@ -88,6 +88,11 @@ else
 
 @code {
     [Parameter, EditorRequired] public PollDefinition Definition { get; set; } = default!;
+
+    /// <summary>The question shown (DESIGN.md §34.5); a simple poll's only question when not given.</summary>
+    [Parameter] public PollQuestion? Question { get; set; }
+
+    private PollQuestion Q => Question ?? Definition.Questions[0];
     [Parameter] public PointsResultSet? Results { get; set; }
     [Parameter] public IReadOnlyDictionary<string, int[]>? Distribution { get; set; }
 
@@ -110,24 +115,9 @@ else
     };
 
     /// <summary>The five-bucket distribution as an SVG histogram plus its text for screen readers.</summary>
-    private static RenderFragment Spread(int[] buckets, int cap, int voters) => __builder =>
-    {
-        var bucketMax = Math.Max(1, buckets.Max());
-        <svg class="histogram" viewBox="0 0 50 30" preserveAspectRatio="none" aria-hidden="true">
-            @for (var k = 0; k < PointsBuckets.Count; k++)
-            {
-                var h = buckets[k] * 28.0 / bucketMax;
-                <g>
-                    <title>@PointsBuckets.Label(k, cap) points: @PollText.VotersShare(buckets[k], voters)</title>
-                    <rect class="hist-hit" x="@(k * 10)" y="0" width="10" height="30" />
-                    <rect class="hist-bar @(k == 0 ? "hist-zero" : "")" x="@(k * 10 + 1)" y="@F(30 - h)" width="8" height="@F(h)" />
-                </g>
-            }
-            <line class="hist-axis" x1="0" y1="30" x2="50" y2="30" />
-        </svg>
-        <span class="visually-hidden">@string.Join(", ", Enumerable.Range(0, PointsBuckets.Count).Select(k => $"{PointsBuckets.Label(k, cap)} points: {buckets[k]} {(buckets[k] == 1 ? "voter" : "voters")}"))</span>
-    };
-
+    private static RenderFragment Spread(int[] buckets, int cap, int voters) => Histogram.Render(
+        Enumerable.Range(0, PointsBuckets.Count).Select(k => new Histogram.Bar(buckets[k], $"{PointsBuckets.Label(k, cap)} points: {PollText.VotersShare(buckets[k], voters)}", k == 0)).ToList(),
+        string.Join(", ", Enumerable.Range(0, PointsBuckets.Count).Select(k => $"{PointsBuckets.Label(k, cap)} points: {buckets[k]} {(buckets[k] == 1 ? "voter" : "voters")}")));
 
     private string Percent(int count) => Results is null || Results.VoterCount == 0
         ? "0%"

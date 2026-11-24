@@ -4,6 +4,7 @@ using Telrang.Core.Ballots;
 using Telrang.Core.Polls;
 using Telrang.Web.Data;
 using Telrang.Web.Features.Polls;
+using Telrang.Web.Features.Voting;
 using Telrang.Web.Security;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -60,7 +61,8 @@ public static class Csv
 }
 
 /// <summary>Owner-only CSV downloads: raw ballots and computed results.</summary>
-public sealed class CsvExportService(IDbContextFactory<ApplicationDbContext> dbFactory, PollAccessService access, ResultsService results)
+public sealed class CsvExportService(IDbContextFactory<ApplicationDbContext> dbFactory, PollAccessService access, ResultsService results,
+    ResponseTextProtection textProtection)
 {
     public sealed record CsvFile(string FileName, byte[] Content);
 
@@ -71,6 +73,7 @@ public sealed class CsvExportService(IDbContextFactory<ApplicationDbContext> dbF
         var a = await access.GetAsync(db, encodedId, VisitorContext.ForUser(userId), tracking: false, ct);
         if (a is null || !a.CanEdit) return null;
         var def = a.Definition;
+        if (ResultsService.UsesResponseTable(def)) return await ResponsesAsync(db, a, ct);
         var rows = (await db.Ballots.AsNoTracking().Where(b => b.PollId == a.Poll.Id)
                 .Select(b => new { b.DisplayName, b.Alias, b.SubmittedAt, b.UpdatedAt, b.PayloadJson }).ToListAsync(ct))
             .OrderBy(b => b.SubmittedAt).ToList();
@@ -109,11 +112,48 @@ public sealed class CsvExportService(IDbContextFactory<ApplicationDbContext> dbF
                 case PollType.Choice:
                 case PollType.Text:
                 case PollType.Number:
-                    throw new NotSupportedException("Question types beyond ranked, points and dates are not supported yet."); // §34 step 3
+                    throw new System.Diagnostics.UnreachableException("UsesResponseTable covers these types.");
                 default:
                     throw new ArgumentOutOfRangeException(nameof(encodedId), def.Questions[0].Type, null);
             }
             Csv.Line(sb, new[] { Csv.Text(row.DisplayName), Csv.Text(row.Alias), Csv.Timestamp(row.SubmittedAt), Csv.Timestamp(row.UpdatedAt) }.Concat(cells));
+        }
+        return new CsvFile(Csv.SafeFileName(def.Title, "ballots"), Csv.ToBytes(sb));
+    }
+
+    /// <summary>Responses read and decrypted per chunk, so a large poll's free text is never all in memory at once.</summary>
+    public const int ExportChunk = 500;
+
+    /// <summary>
+    /// The ballots CSV of a structured poll (DESIGN.md §34.5): one row per response in submission order, one column per question
+    /// (<c>q2 · Diet</c>), each cell <see cref="AnswerText"/>'s form, free text included (the owner's file). Every cell but a
+    /// number goes through <see cref="Csv.Text"/>, so no label or text starts a formula.
+    /// </summary>
+    private async Task<CsvFile> ResponsesAsync(ApplicationDbContext db, PollAccess a, CancellationToken ct)
+    {
+        var def = a.Definition;
+        var data = await results.OwnerDataAsync(a, ct);
+        var free = ResultsService.HasFreeText(def);
+        var sb = new StringBuilder();
+        Csv.Line(sb, new[] { "Name", "Alias", "SubmittedAt", "UpdatedAt" }.Select(Csv.Raw)
+            .Concat(def.Questions.Select(q => Csv.Text(q.Key + " · " + BallotService.QuestionLabel(def, q)))));
+        foreach (var chunk in data.Responses.Chunk(ExportChunk))
+        {
+            var ids = chunk.Select(r => r.BallotId).ToList();
+            var stored = (await db.Ballots.AsNoTracking().Where(b => b.PollId == a.Poll.Id && ids.Contains(b.Id))
+                    .Select(b => new { b.Id, b.SubmittedAt, b.UpdatedAt, b.TextCipher }).ToListAsync(ct))
+                .ToDictionary(b => b.Id);
+            foreach (var r in chunk)
+            {
+                if (!stored.TryGetValue(r.BallotId, out var row)) continue; // deleted since the results were computed
+                var texts = free ? textProtection.RevealTexts(a.Poll.Id, row.TextCipher) : null;
+                var cells = def.Questions.Select((q, i) =>
+                {
+                    var text = AnswerText.Cell(q, data.Layout, i, r, owner: true, texts, AnswerText.Form.Csv);
+                    return q.Type == PollType.Number ? Csv.Raw(text) : Csv.Text(text);
+                });
+                Csv.Line(sb, new[] { Csv.Text(r.DisplayName), Csv.Text(r.Alias), Csv.Timestamp(row.SubmittedAt), Csv.Timestamp(row.UpdatedAt) }.Concat(cells));
+            }
         }
         return new CsvFile(Csv.SafeFileName(def.Title, "ballots"), Csv.ToBytes(sb));
     }
@@ -125,7 +165,8 @@ public sealed class CsvExportService(IDbContextFactory<ApplicationDbContext> dbF
         var r = await results.ComputeAsync(a, ct);
         var def = a.Definition;
         var sb = new StringBuilder();
-        if (r.Ranked is { } ranked)
+        if (ResultsService.UsesResponseTable(def)) QuestionsTable(sb, def, r);
+        else if (r.Ranked is { } ranked)
         {
             Csv.Line(sb, ["Place", "Option", "Score", "FirstChoices", "Bans", "BanPercent"]);
             foreach (var (row, place) in Places(ranked.Rows, x => Math.Round(x.Score, 9)))
@@ -154,6 +195,81 @@ public sealed class CsvExportService(IDbContextFactory<ApplicationDbContext> dbF
             }
         }
         return new CsvFile(Csv.SafeFileName(def.Title, "results"), Csv.ToBytes(sb));
+    }
+
+    /// <summary>
+    /// The results CSV of a structured poll (or one choice, text or number question): one row per figure,
+    /// <c>Question,Option,Measure,Value</c>, so every type fits one table. Counts only, never free text.
+    /// </summary>
+    private static void QuestionsTable(StringBuilder sb, PollDefinition def, PollResults r)
+    {
+        Csv.Line(sb, ["Question", "Option", "Measure", "Value"]);
+        foreach (var qr in r.Questions)
+        {
+            var q = qr.Question;
+            var name = Csv.Text(q.Key + " · " + BallotService.QuestionLabel(def, q));
+            void Add(string? option, string measure, string value) =>
+                Csv.Line(sb, [name, option is null ? "" : Csv.Text(option), Csv.Raw(measure), value]);
+            switch (q.Type)
+            {
+                case PollType.Ranked:
+                    foreach (var (row, place) in Places(qr.Ranked!.Rows, x => Math.Round(x.Score, 9)))
+                    {
+                        Add(row.Label, "Place", Csv.Number(place));
+                        Add(row.Label, "Score", Csv.Number(row.Score, q.Scoring == ScoringScheme.Borda ? "0" : "0.####"));
+                        Add(row.Label, "FirstChoices", Csv.Number(row.FirstChoiceCount));
+                        Add(row.Label, "Bans", Csv.Number(row.BanCount));
+                    }
+                    break;
+                case PollType.Points:
+                    foreach (var (row, place) in Places(qr.Points!.Rows, x => (double)x.Total))
+                    {
+                        Add(row.Label, "Place", Csv.Number(place));
+                        Add(row.Label, "Total", Csv.Number(row.Total));
+                        Add(row.Label, "Mean", Csv.Number(row.Mean, "0.##"));
+                        Add(row.Label, "Supporters", Csv.Number(row.SupporterCount));
+                    }
+                    break;
+                case PollType.Dates:
+                    foreach (var row in qr.Dates!.Rows)
+                    {
+                        Add(row.Label, "Place", Csv.Number(row.Place));
+                        Add(row.Label, "Yes", Csv.Number(row.Yes));
+                        Add(row.Label, "Maybe", Csv.Number(row.Maybe));
+                        Add(row.Label, "No", Csv.Number(row.No));
+                    }
+                    break;
+                case PollType.Choice:
+                {
+                    var c = qr.Choice!;
+                    Add(null, "Respondents", Csv.Number(c.RespondentCount));
+                    foreach (var row in c.Rows)
+                    {
+                        Add(row.Label, "Count", Csv.Number(row.Count));
+                        Add(row.Label, "Percent", Csv.Number(row.Share * 100, "0.#"));
+                    }
+                    if (q.AllowOther)
+                    {
+                        Add(AnswerText.OtherLabel, "Count", Csv.Number(c.OtherCount));
+                        Add(AnswerText.OtherLabel, "Percent", Csv.Number(c.OtherShare * 100, "0.#"));
+                    }
+                    break;
+                }
+                case PollType.Number:
+                {
+                    var n = qr.Number!;
+                    Add(null, "Count", Csv.Number(n.Count));
+                    foreach (var (measure, value, places) in new[] { ("Min", n.Min, 28), ("Max", n.Max, 28), ("Mean", n.Mean, q.Decimals + 2), ("Median", n.Median, q.Decimals + 1) })
+                        Add(null, measure, value is { } v ? Csv.Raw(PollText.Decimal(v, places)) : "");
+                    break;
+                }
+                case PollType.Text:
+                    Add(null, "Answers", Csv.Number(qr.Text!.AnswerCount));
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(def), q.Type, null);
+            }
+        }
     }
 
     private static string AvailabilityWord(Availability a) => a switch

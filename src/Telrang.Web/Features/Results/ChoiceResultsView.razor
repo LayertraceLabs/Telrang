@@ -1,0 +1,59 @@
+@using Telrang.Core.Scoring
+@* Choice results (DESIGN.md §34.3): per option the respondents who picked it and their share, as a bar (inline SVG with
+   width attributes; the CSP forbids style attributes) whose <title> names the value (DESIGN.md §33). Shares are of the
+   respondents, so with several selections they add up to more than 100%. Other is a count only; its texts are the
+   owner's (FreeTextList, from QuestionResults). *@
+<p class="small text-secondary mb-2">@PollText.AnswersText(Results.RespondentCount)</p>
+<div class="table-responsive">
+    <table class="table align-middle results-table choice-results">
+        <thead>
+            <tr>
+                <th scope="col" class="opt-col">Option</th>
+                <th scope="col" class="text-end">Count</th>
+                <th scope="col" class="text-end"><abbr title="Share of the respondents">Share</abbr></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in Results.Rows)
+            {
+                <tr @key="row.Key">
+                    <td class="opt-col">
+                        <span class="fw-semibold"><bdi>@row.Label</bdi></span>
+                        @Bar(row.Count, row.Share)
+                    </td>
+                    <td class="text-end font-monospace">@row.Count</td>
+                    <td class="text-end">@Percent(row.Share)</td>
+                </tr>
+            }
+            @if (Question.AllowOther)
+            {
+                <tr class="choice-other">
+                    <td class="opt-col">
+                        <span class="fw-semibold">Other</span>
+                        @Bar(Results.OtherCount, Results.OtherShare)
+                    </td>
+                    <td class="text-end font-monospace">@Results.OtherCount</td>
+                    <td class="text-end">@Percent(Results.OtherShare)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PollQuestion Question { get; set; } = default!;
+    [Parameter, EditorRequired] public ChoiceResultSet Results { get; set; } = default!;
+
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    private static string Percent(double share) => (share * 100).ToString("0", Inv) + "%";
+
+    private RenderFragment Bar(int count, double share) => __builder =>
+    {
+        <svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+            <title>@PollText.VotersShare(count, Results.RespondentCount)</title>
+            <rect class="bar-track" x="0" y="0" width="100" height="6" />
+            <rect class="bar-fill" x="0" y="0" width="@((share * 100).ToString("0.##", Inv))" height="6" />
+        </svg>
+    };
+}
