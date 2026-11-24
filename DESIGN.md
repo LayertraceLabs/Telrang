@@ -1573,6 +1573,13 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   later migration). A database error during the live stream's recheck ends the stream with an Information line, not a
   failed request per open stream.
 
+- 2026-11-24 (§34, 0.4): polls get several questions on pages and in groups, the types Choice, Text and Number, a
+  look per poll and saved looks, reports and take-down. Everything stays a "poll"; a one-question poll keeps today's
+  editor and pages. A ballot is still written once (earlier pages travel in a protected form field; signed-in voters
+  also get an encrypted draft the owner never sees). Free text is owner-only, compressed and encrypted in its own
+  column. No custom CSS or images per poll, no external image URLs; uploads are a later, per-account feature (§34.12).
+  `release/0.3` carries 0.3 fixes, `main` is 0.4.
+
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
 Status: **[5a done]** marks what Phase 5a implemented (details and deviations in §13, "phase 5a").
@@ -2975,3 +2982,179 @@ signed-in visitors lose the navigation and width on `/p/*`.
 - The pager counts ballots ("Ballots 51–100 of N") on all three types; `?view=ballots&rows=N`.
 - The ballots view replaces the summary below the toolbar (counts line, change log and owner bar stay); live updates
   refetch `location.href`, so the query survives (e2e `owner-results` checks a new column arriving live).
+
+## 34. Multi-question polls, new question types, poll looks (decided 2026-11-24, for 0.4)
+Telrang grows from one question per poll to forms: several questions of several types, on pages, in groups, with an
+optional look per poll. 0.3 fixes continue on `release/0.3`; `main` is 0.4.
+
+### 34.1 One kind: a poll (concept A of the layout samples)
+- Everything stays a **poll**. A poll with one question and no pages or groups is a *simple poll*: editor, vote page and
+  results look exactly as now. "Add question", "Add group" or "Add page" turns the editor into the *structured* editor;
+  removing everything back down to one question and no pages/groups turns it back.
+- Lists, mails and the share page name the type of a simple poll ("Ranked") and the size of a structured one
+  ("4 pages · 9 questions", `Poll.QuestionCount`/`Poll.PageCount`, written on save; `Poll.Type` stays the first
+  question's type).
+- Rejected: two kinds Poll and Form (two editors, a poll needing one more question becomes a copy); a builder for every
+  poll (a one-question poll carries pages and groups it never uses).
+
+### 34.2 Structure (Core)
+- `PollDefinition` keeps one flat, ordered `Questions` list, so scoring, results and ballots stay per question. Layout
+  is added beside it: `Pages` (key `p1`…, title, description Markdown) and `Groups` (key `g1`…, title, description).
+  Each `PollQuestion` gets `Page` and `Group` (nullable keys). A definition without pages is one implicit page
+  (every definition stored before 0.4).
+- Validator rules: questions in page order; a group's questions are contiguous and on one page; a page has at least one
+  question; keys unique. Group = a titled box on a page (the "You" / "Partner" case); no nesting, no group across pages.
+- Every question gets `Prompt` (the question text; may be empty in a simple poll, where the poll title is the question),
+  `HelpMarkdown` (optional) and `Required`.
+- Question, page and group keys are never reused, like option keys (§26): `QuestionsIssued`, `PagesIssued`,
+  `GroupsIssued` counters on the definition; keys added by an edit are numbered from them.
+- Out of scope for 0.4, but the model must not block them: conditional pages (skip to a page by answer), quiz scoring,
+  piping answers into later questions, file uploads as answers.
+
+### 34.3 Question types
+`PollType` gains `Choice`, `Text`, `Number` (every `switch` stays exhaustive). Ballot payloads stay keyed by question
+(`{"q1": {...}, "q2": {...}}`); a missing key is "not answered".
+
+| Type | Settings (fixed at creation) | Ballot | Results |
+|---|---|---|---|
+| Choice | options (≥ 2), min and max selections (1…n), Other with text, shown as buttons or dropdown (max 1 only) | `{"keys": [...], "other": true}` | count and % of respondents per option, "Other: N" |
+| Text | single or multi line, min and max length (≤ admin limit) | text only (below) | number of answers; the texts owner-only |
+| Number | min, max (optional), decimals 0–6, unit (≤ 16 chars) | `{"value": "12.5"}` (decimal as string) | count, min, max, mean, median, histogram |
+| Ranked, Points, Dates | as now | as now | as now |
+
+- **One choice type.** Multiple choice and checkboxes are the same question with a different maximum: max 1 renders
+  radio buttons (or a dropdown), more renders checkboxes. The editor's type segment offers both names ("Choice" = max 1,
+  "Checkboxes" = max = number of options) as presets of the one type; Core, the ballot, results and CSV know only `Choice`.
+- "Required": ranked = at least one option ranked; points = more than 0 points spent (spend all already forces the
+  budget); dates = at least one yes or maybe; others = an answer.
+- Numbers are `decimal`, parsed invariant, never rounded: a value with more decimals than allowed is refused.
+- **Free text is owner-only.** Text answers and "Other" texts are never shown to voters, whatever the results and
+  "Show ballots" settings: voters see "Other: N" and "N answers". The owner sees them in the results (paged), the
+  ballots view and the CSV. They are plain text (no Markdown), in `<bdi>`.
+- **Free text is stored apart, compressed and encrypted.** `Ballot.PayloadJson` holds only what is scored (keys, ranks,
+  points, numbers, the `other` flag). All free text of a response is one JSON object (`{"q5": "…", "q2.other": "…"}`)
+  in `Ballot.TextCipher`: Brotli-compressed when that makes it smaller (built into .NET; a leading byte says which),
+  then encrypted like email addresses (§30; compression must come first, ciphertext does not compress). Summaries never
+  select the column; only the owner's text view, ballots view and CSV read and decrypt it, a page at a time. A lost
+  Data Protection key loses the texts, as it loses the addresses.
+- **Response size**: the free text of one response is at most 8 KiB (admin limit, UTF-8 before compression), checked
+  with the per-question maxima; the scored payload is bounded by the question and option limits.
+
+### 34.4 Voting: pages without JavaScript
+- `/p/{id}` shows page 1, `/p/{id}?page=N` page N (with `&r=N` for responses as now). Still static SSR, the named form
+  `vote`, post/redirect/get (§21.1). Buttons: Back, Next, Submit (last page). The identity comes from the request
+  through `PollAccessService` on every post, as now.
+- **A ballot is written once, on Submit.** Until then the answers of the pages already filled travel in the form: a
+  hidden field `_carry`, protected with Data Protection (purpose bound to the poll id, the voter identity and the
+  response number; valid 24 hours; size-capped like a response). Next checks the page (required, limits) and re-issues
+  the field with that page merged in; Back merges what is valid without the required check; Submit checks every page
+  and writes the ballot in one transaction, as today. A field that fails to unprotect (expired, other identity, forged)
+  starts the form over with one line saying so. Nothing a voter typed is stored before Submit, there are no unfinished
+  ballots, and no ballot query changes.
+- `FormLimitMiddleware` admits the vote form with a full carry field (computed from the limits, as for the editor).
+- **Signed-in voters: progress is kept.** For a voter identified by account, every Next also stores the carry content
+  as a draft: table `ResponseDrafts` (PollId, UserId, ResponseNo, Cipher, UpdatedAt; unique per poll, user and response;
+  encrypted whole like `TextCipher`). Opening the poll with a draft resumes on the page they left ("Draft · saved
+  <time>", buttons Continue and Discard). A draft is not a ballot: it is in no count, result, list, CSV or mail, the
+  owner cannot see that it exists, and it is deleted on Submit, on Discard, when the poll closes or is deleted, and
+  with the account. Cookie and invite-link voters have no drafts (nothing moves from a cookie to an account, §16).
+  Cost: one small write per page for signed-in voters only.
+- Editing a submitted response loads it into the carry field; the stored ballot changes on Submit only.
+- `PollChangeNotifier.Changed` is called on Submit, as now. A page indicator lists the pages ("1 · Attending"); it is
+  not a set of links (a jump would lose the page's unsaved fields without JS). `js/vote.js` only enhances fields.
+- A simple poll has no pages: one Submit, no carry field, as now.
+
+### 34.5 Editor and results
+- Simple editor: today's `PollEditor`, the type segment gains Choice, Checkboxes, Text, Number, and an add bar
+  (Add question · Add group · Add page) below the options.
+- Structured editor: tabs Questions · Voting and results · Look · Preview. Questions = an outline (pages, groups,
+  questions with their type) beside the editor of the selected item; move up/down, remove (no drag library).
+  Browser drafts stay `PollDraft` JSON (`Pages`, `Groups`, the new question fields).
+- §26 applies per question: type and rules fixed; prompt, help, options, pages, groups and order may change; questions
+  may be added and removed (removed answers are ignored on read). The change log gains question entries
+  ("Question “Diet” added", "Question “Shirt size” removed (answered on 7 ballots)", "Question renamed") and names the
+  question on option entries in a structured poll.
+- Results page: one section per question under page and group headings, reusing today's per-type views; new views for
+  Choice (bars), Number (the points histogram component), Text (owner-only, paged). All questions are scored in one
+  pass over the ballots; the per-poll cache stays. Ballots view and CSV: one row per response, one column per question
+  (`q2 · Diet`), the ranked/points/dates cells in their current text form.
+- Limits (admin, `PollLimits`): questions 50, pages 20, groups 30, prompt 200, help 1 000, text answer max 2 000,
+  free text per response 8 KiB.
+- **One of each** (no second implementation; reviews check these):
+  - One `QuestionEditor` component (type settings + options). The simple editor is it plus the poll settings; the
+    structured editor is the outline plus the same component. No type's settings UI exists twice.
+  - One vote path. `VotePage` renders questions through one `QuestionInput` switch over the per-type components
+    (`RankedVote`, `PointsVote`, `DatesVote`, new `ChoiceVote`, `TextVote`, `NumberVote`); a simple poll is a page with
+    one question and no page chrome. Same for results (`QuestionResults`).
+  - One options editor (list / text, `OptionListParser`) for ranked, points and choice.
+  - One theme pipeline: a poll look is a subset of `ThemeSettings`' fields, validated and turned into CSS by the same
+    code as the instance theme (§34.6).
+  - No new packages: `decimal`, `System.Text.Json`, `BrotliStream`, Data Protection, the existing base64url helper
+    and SVG histogram cover everything in §34.
+
+### 34.6 Poll looks
+- A **look** is a validated set of theme tokens per poll: base and highlight colour for light and for dark mode
+  (through `PaletteDerivation`, so contrast holds), font (the existing `ThemeFont` stacks) and corner radius. Nothing
+  else in 0.4: no density, width or header options, no custom CSS, no images, no external fonts or files. Everything
+  is served from the instance; any font added later is bundled and freely licensed (OFL or similar).
+- The record, its validation and the CSS writer are shared with the instance theme (the colour, font and radius part
+  of `ThemeSettings` becomes one type both use); no second validator or generator.
+- Stored as `Poll.LookJson` (null = the instance theme). Not a fixed setting and not change-logged: it is cosmetic.
+- Served as `/p/{id}/look.css?v=<hash>` (access through `PollAccessService.CanView`, unknown ids 404), linked after
+  the instance stylesheet on `/p/*` pages only, where it styles the whole page including the signed-in shell. It
+  overrides `--av-*` tokens and nothing else. Pages on the `?admin=1` variant never get it.
+- Admin setting "Poll looks" (on by default); off = every poll shows the instance theme.
+- Rejected: per-poll custom CSS (can fake a sign-in box or another organisation's site on the host's domain; can hide
+  the report link). Full branding stays per instance (admin theme, branding, custom CSS, §17).
+
+### 34.7 My looks (saved looks)
+- Account page `/looks` (`MainLayout`): list, new, edit (preview on a sample vote page), rename, delete, "Use as
+  default". Table `SavedLooks` (Id, OwnerId, Name ≤ 60, LookJson, CreatedAt, UpdatedAt); per-user limit 20 through
+  `UserLimits`, insert under `OwnerLock`; `ApplicationUser.DefaultLookId` (null = instance theme).
+- New polls start with the default look. The editor's Look tab: pick a saved look, adjust, "Save as look".
+- **Polls hold a copy**, not a reference: editing or deleting a saved look never changes a poll. Copying a poll
+  (`?from=`) copies its look.
+- **Import** on `/looks`: paste a poll link (resolved with `CanView` for the importing account; a look is only colours
+  and fonts, already public in the poll's stylesheet) or a look code. **Export**: "Copy code" (`data-copy`). A look code
+  is `tl1.` + base64url(JSON of the look), ≤ 512 bytes, decoded and validated by the same rules as a form post.
+
+### 34.8 Reports and take-down (in 0.4, built last)
+Hosting other people's polls makes the operator a host of their content (any VPS operator included). Baseline:
+- A "Report" link on `/p/*` pages → a static form (category: illegal content, abuse, impersonation, spam, other;
+  optional text ≤ 1 000; optional contact address, encrypted, §30) with `FormGuardFields`, rate limited, no IP stored.
+- Admin tab "Reports": open reports with the poll; actions dismiss, disable poll, delete poll (blocking the owner is
+  the existing Users action); all through `AdminService` with the action log. A disabled poll (`Poll.DisabledAt`)
+  answers 410 with one line to every visitor except the owner and admins; the owner sees why on My polls.
+- Admin setting: reports on/off and an optional contact line on the legal page.
+
+### 34.9 Data changes (both migration sets, one migration per step)
+`Ballot.TextCipher`; `ResponseDrafts`; `Poll.QuestionCount`, `Poll.PageCount`, `Poll.LookJson`, `Poll.DisabledAt`;
+`PollChanges.QuestionKey`, `PollChanges.QuestionLabel`, new kinds; `SavedLooks`; `ApplicationUser.DefaultLookId`;
+`PollReports`. No change to how existing ballots are read. `EncryptedEmailTests` must keep passing: text answers,
+drafts and report texts are ciphertext.
+
+### 34.10 Order of work
+1. Core: model (pages, groups, question fields, counters), new types in validator, ballot validator and results,
+   question change log. (Library work; unit tests.)
+2. Web data and voting: migrations, the carry field, `TextCipher`, drafts for signed-in voters, multi-page vote page,
+   `QuestionInput` and the new input components.
+3. Results, ballots view, CSV for all types and structured polls.
+4. Editor: `QuestionEditor` extracted, new types in the simple editor, structured editor, Look tab.
+5. Looks: shared theme type, look record and look code, `look.css`, admin switch, `/looks` with import/export.
+6. Reports and take-down.
+7. e2e flows: multi-page vote without and with JS, a signed-in draft resumed, look import, report → disable.
+
+### 34.11 Resources
+Unchanged by design: `/p/*` stays static with no circuit or WebSocket; one database write per response (plus one per
+page for signed-in voters' drafts); the structured editor and `/looks` are ordinary signed-in pages on the existing
+circuit. Results cost grows with the scored payload only, never with free text.
+
+### 34.12 Images (decided 2026-11-24: not in 0.4)
+- Markdown images stay as they are (§31): rendered as their alt text, never `<img>`; the CSP keeps `img-src 'self'`.
+  No option to render external image URLs: every voter's browser would report to a server the poll owner picks.
+  External *links* stay allowed (a visible, deliberate click, `noreferrer`).
+- Uploads come after 0.4 as their own section: off by default and granted per account by an admin (fits closed
+  instances and homelabs; hosts with open registration leave it off), PNG/JPEG/WebP by signature, metadata stripped,
+  limits per image, per user count and per user total, served only inside the poll's pages (`CanView`,
+  `Cross-Origin-Resource-Policy: same-origin`, cross-site and direct requests refused), deleted with the poll, an admin
+  review tab, and a notice at upload that admins can see the image. Depends on §34.8.
