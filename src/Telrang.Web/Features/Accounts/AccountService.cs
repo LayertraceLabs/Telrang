@@ -579,7 +579,7 @@ public sealed class AccountService(
     public async Task<byte[]> ExportAsync(ApplicationUser user, CancellationToken ct = default)
     {
         var polls = await db.Polls.AsNoTracking().Where(p => p.OwnerId == user.Id)
-            .Select(p => new { p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt, p.DefinitionJson, p.LookJson, Ballots = p.Ballots.Count })
+            .Select(p => new { p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt, p.DisabledAt, p.DefinitionJson, p.LookJson, Ballots = p.Ballots.Count })
             .ToListAsync(ct);
         var ballotRows = await db.Ballots.AsNoTracking().Where(b => b.UserId == user.Id)
             .Select(b => new { b.PollId, b.Poll!.Title, b.Poll.Type, b.ResponseNo, b.DisplayName, b.SubmittedAt, b.UpdatedAt, b.PayloadJson, b.TextCipher })
@@ -627,7 +627,10 @@ public sealed class AccountService(
             },
             polls = polls.OrderBy(p => p.CreatedAt).Select(p => new
             {
-                p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt, BallotCount = p.Ballots,
+                p.Title, p.CreatedAt, p.UpdatedAt, p.ClosedAt,
+                // When an admin disabled it (DESIGN.md §34.8); never who reported it or what the reports say.
+                p.DisabledAt,
+                BallotCount = p.Ballots,
                 definition = JsonSerializer.Deserialize<JsonElement>(p.DefinitionJson),
                 look = LookElement(p.LookJson), // DESIGN.md §34.6; null = the instance theme
             }),

@@ -17,7 +17,7 @@ partial class PostgresDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261124172701_PollLooks";
+    public override string LastMigrationId => "20261124180248_Reports";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -633,6 +633,9 @@ partial class PostgresDbContextModelSnapshot : ModelSnapshot
                     .IsRequired()
                     .HasColumnType("text");
 
+                b.Property<DateTimeOffset?>("DisabledAt")
+                    .HasColumnType("timestamp with time zone");
+
                 b.Property<string>("LookJson")
                     .HasMaxLength(1024)
                     .HasColumnType("text");
@@ -748,6 +751,48 @@ partial class PostgresDbContextModelSnapshot : ModelSnapshot
                 b.HasIndex("UserId", "At");
 
                 b.ToTable("PollCreations");
+            });
+
+        modelBuilder.Entity("Telrang.Web.Data.PollReport", b =>
+            {
+                b.Property<Guid>("Id")
+                    .HasColumnType("uuid");
+
+                b.Property<string>("Category")
+                    .IsRequired()
+                    .HasMaxLength(20)
+                    .HasColumnType("character varying(20)");
+
+                b.Property<string>("ContactCipher")
+                    .HasColumnType("text");
+
+                b.Property<long>("CreatedAt")
+                    .HasColumnType("bigint");
+
+                b.Property<long?>("HandledAt")
+                    .HasColumnType("bigint");
+
+                b.Property<long?>("HandledLogId")
+                    .HasColumnType("bigint");
+
+                b.Property<Guid>("PollId")
+                    .HasColumnType("uuid");
+
+                b.Property<string>("State")
+                    .IsRequired()
+                    .HasMaxLength(20)
+                    .HasColumnType("character varying(20)");
+
+                b.Property<string>("TextCipher")
+                    .HasColumnType("text");
+
+                b.HasKey("Id");
+
+                b.HasIndex("PollId");
+
+                b.HasIndex("State", "PollId");
+
+                b.ToTable("PollReports");
             });
 
         modelBuilder.Entity("Telrang.Web.Data.ResponseDraft", b =>
@@ -985,6 +1030,17 @@ partial class PostgresDbContextModelSnapshot : ModelSnapshot
             {
                 b.HasOne("Telrang.Web.Data.Poll", "Poll")
                     .WithMany("Changes")
+                    .HasForeignKey("PollId")
+                    .OnDelete(DeleteBehavior.Cascade)
+                    .IsRequired();
+
+                b.Navigation("Poll");
+            });
+
+        modelBuilder.Entity("Telrang.Web.Data.PollReport", b =>
+            {
+                b.HasOne("Telrang.Web.Data.Poll", "Poll")
+                    .WithMany()
                     .HasForeignKey("PollId")
                     .OnDelete(DeleteBehavior.Cascade)
                     .IsRequired();

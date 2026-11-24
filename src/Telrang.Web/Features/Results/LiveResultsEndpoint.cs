@@ -45,7 +45,11 @@ public static class LiveResultsEndpoint
         LiveStreamLimiter limiter, AbuseTracker abuse, BlockedRangeService ranges, TimeProvider time,
         IOptions<IdentityOptions> identityOptions, IHostApplicationLifetime lifetime, ILoggerFactory loggers)
     {
-        if (users.GetUserId(http.User) is not { } userId) return TypedResults.NotFound();
+        // DESIGN.md §34.8: a disabled poll answers 410 here too, for everyone but its owner and admins (who get the owner check).
+        var signedInId = users.GetUserId(http.User);
+        if (await access.GetAsync(id, VisitorContext.ForUser(signedInId), http.RequestAborted) is { Unavailable: true })
+            return Polls.PollUnavailable.Result();
+        if (signedInId is not { } userId) return TypedResults.NotFound();
         var check = new AccessCheck(id, userId, http.User.IsInRole(AppRoles.Admin), http.Connection.RemoteIpAddress,
             http.User.FindFirstValue(identityOptions.Value.ClaimsIdentity.SecurityStampClaimType),
             dbFactory, access, abuse, ranges, time, loggers.CreateLogger(typeof(LiveResultsEndpoint)));

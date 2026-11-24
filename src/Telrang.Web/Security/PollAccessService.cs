@@ -22,6 +22,11 @@ public enum AccessDenial
     SignInRequired,
     /// <summary><c>voters: accounts</c> and the signed-in account has no verified email (or is gated/deleted).</summary>
     EmailNotVerified,
+    /// <summary>
+    /// An admin disabled the poll (DESIGN.md §34.8). For everyone but its owner and admins the poll is
+    /// <see cref="PollAccess.Unavailable"/>; for those two it is shown and nobody votes.
+    /// </summary>
+    Disabled,
 }
 
 public enum VoterKind
@@ -89,6 +94,18 @@ public sealed record PollAccess(
     /// and timing, the poll shows ballots and asks for names. The owner's own views (grid, CSV) do not depend on it.
     /// </summary>
     public bool CanSeeBallots { get; init; }
+
+    /// <summary>An admin disabled the poll (<see cref="Poll.DisabledAt"/>); true for every visitor.</summary>
+    public bool IsDisabled => Poll.DisabledAt is not null;
+
+    /// <summary>
+    /// Disabled and the visitor is neither the owner nor an admin (DESIGN.md §34.8): every <c>/p/{id}…</c> route answers 410
+    /// with <see cref="PollAccessService.UnavailableMessage"/> and nothing of the poll. Every capability is false.
+    /// </summary>
+    public bool Unavailable { get; init; }
+
+    /// <summary>Disabled, and the visitor is an admin who is not the owner: shown for review, read-only.</summary>
+    public bool AdminReview { get; init; }
 }
 
 /// <summary>Who sees results and ballot rows (DESIGN.md §25), from the definition alone.</summary>
@@ -127,6 +144,10 @@ public sealed class PollAccessService(IDbContextFactory<ApplicationDbContext> db
     public const string InviteClaimedMessage = "This invitation is linked to another account. Sign in.";
     /// <summary>The same refusal for a visitor already signed in, as an account that is not the one the link belongs to.</summary>
     public const string InviteClaimedSignedInMessage = "This invitation is linked to another account.";
+    /// <summary>The one line of the 410 answer for a disabled poll (DESIGN.md §34.8).</summary>
+    public const string UnavailableMessage = "This poll is unavailable.";
+    /// <summary>What the owner and admins see on a disabled poll.</summary>
+    public const string DisabledMessage = "Disabled by an admin.";
 
     /// <summary>Read-only access check on its own short-lived DbContext.</summary>
     public async Task<PollAccess?> GetAsync(string? encodedId, VisitorContext visitor, CancellationToken ct = default)
@@ -153,17 +174,33 @@ public sealed class PollAccessService(IDbContextFactory<ApplicationDbContext> db
         var isOwner = visitor.UserId is not null && visitor.UserId == poll.OwnerId;
         var isClosed = PollState.IsClosed(poll, now);
 
+        // DESIGN.md §34.8: a disabled poll is unavailable to everyone but its owner and admins (checked in the database, as
+        // AdminService does). Nothing else is looked up for them: no voter identity, no counts.
+        var disabled = poll.DisabledAt is not null;
+        var adminReview = disabled && !isOwner && visitor.UserId is { } reviewer && await Features.Admin.AdminService.IsAdminInDatabaseAsync(db, reviewer, ct);
+        if (disabled && !isOwner && !adminReview)
+        {
+            return new PollAccess(poll, definition, PollId.Encode(poll.Id), IsOwner: false, CanView: false, CanVote: false,
+                CanSeeResults: false, CanEdit: false, Voter: null, HasBallot: false, isClosed, AccessDenial.Disabled, UnavailableMessage)
+            {
+                Unavailable = true,
+            };
+        }
+
         var (voter, denial) = await ResolveVoterAsync(db, poll, visitor, ct);
 
         var stored = voter?.Stored;
         var responseCount = voter is null ? 0 : await db.Ballots.CountAsync(b => b.PollId == poll.Id && b.VoterIdentity == stored, ct);
         var hasBallot = responseCount > 0;
-        var canVote = !isClosed && voter is not null;
+        var canVote = !isClosed && !disabled && voter is not null;
         // Never overwrite an earlier denial (callers rely on e.g. InviteUnknown to answer 404), except
         // a missing voter cookie: on a closed poll "closed" is the reason that matters.
         if (isClosed && denial is AccessDenial.None or AccessDenial.NoVoterIdentity or AccessDenial.SignInRequired
                 or AccessDenial.EmailNotVerified)
             denial = AccessDenial.Closed;
+
+        // Disabled: the owner and a reviewing admin see the poll, nobody votes; the reason is the disabling.
+        if (disabled && denial != AccessDenial.InviteUnknown) denial = AccessDenial.Disabled; // an unknown token stays a 404
 
         var canSeeResults = ResultsRules.CanSeeResults(definition, isOwner, hasBallot, isClosed);
 
@@ -174,6 +211,7 @@ public sealed class PollAccessService(IDbContextFactory<ApplicationDbContext> db
         {
             ResponseCount = responseCount,
             CanSeeBallots = ResultsRules.CanSeeBallots(definition, isOwner, hasBallot, isClosed),
+            AdminReview = adminReview,
         };
     }
 
@@ -233,6 +271,7 @@ public sealed class PollAccessService(IDbContextFactory<ApplicationDbContext> db
         AccessDenial.NoVoterIdentity => "Cookies are required to vote.",
         AccessDenial.SignInRequired => "Sign in to respond.",
         AccessDenial.EmailNotVerified => "Verify your email to respond.",
+        AccessDenial.Disabled => DisabledMessage,
         _ => null,
     };
 }

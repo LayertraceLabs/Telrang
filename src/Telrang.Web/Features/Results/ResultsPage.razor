@@ -13,7 +13,11 @@
 @inject NavigationManager Nav
 @inject TimeProvider Time
 
-@if (access is { } a)
+@if (access is { Unavailable: true })
+{
+    <PollUnavailable />
+}
+else if (access is { } a)
 {
     var d = a.Definition;
     var live = a.CanEdit && results is not null;
@@ -32,6 +36,10 @@
         else
         {
             <span class="badge badge-open">Open</span>
+        }
+        @if (a.IsDisabled)
+        {
+            <span class="badge text-bg-danger" title="@PollAccessService.DisabledMessage">Disabled</span>
         }
         @if (live)
         {
@@ -200,7 +208,7 @@
     private PollAccess? access;
     private bool isPost;
     private string? actionError;
-    private bool ShowsReopen => access is { CanEdit: true, Poll.ClosedAt: not null };
+    private bool ShowsReopen => access is { CanEdit: true, Poll.ClosedAt: not null, IsDisabled: false }; // a disabled poll stays closed (DESIGN.md §34.8)
     private bool ShowsClose => access is { CanEdit: true, Poll.ClosedAt: null, IsClosed: false };
     private string FormAction => $"p/{access?.EncodedId ?? Id}/results";
     private PollResults? results;
@@ -228,6 +236,7 @@
         isPost = HttpMethods.IsPost(Http.Request.Method);
         access = await AccessService.GetAsync(Id, visitor, Http.RequestAborted);
         if (access is null) { Nav.NotFound(); return; }
+        if (access.Unavailable) { PollUnavailable.Answer(Http); return; } // DESIGN.md §34.8: 410, nothing of the poll
         var viewerZone = userId is null ? null : (await Users.GetUserAsync(Http.User))?.TimeZone;
         zone = PollTime.ViewerZone(viewerZone, access.Definition.TimeZone);
         changes = await Polls.ListChangesAsync(access, Http.RequestAborted);
@@ -274,7 +283,7 @@
     /// <summary>The same service call as the share page; the owner check is the request's, through CanEdit.</summary>
     private async Task SetClosedAsync(bool closed)
     {
-        if (access is null) return;
+        if (access is null or { Unavailable: true }) return;
         if (!access.CanEdit || Users.GetUserId(Http.User) is not { } userId)
         {
             // Not the owner (or signed out since the form was rendered): nothing changes, as for a poll it cannot see.
