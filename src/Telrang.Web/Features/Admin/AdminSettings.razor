@@ -114,7 +114,7 @@
             <p>Visitors may report a poll from a "Report" link on its vote and results pages: a category, optional details (at most
                 @PollReport.MaxTextLength characters) and an optional email address. Admins see them on the Reports tab. No IP address, browser or
                 account is stored with a report; the details and the address are stored encrypted. On by default.</p>
-            <p>At most @ReportService.MaxOpenPerPoll open reports per poll and @ReportService.MaxOpen in all are kept; further ones are accepted and not stored. The admins are
+            <p>At most @ReportService.MaxOpenPerPoll open reports per poll and @ReportService.MaxOpen in all are kept; further ones are accepted and not stored, except a poll's first. The admins are
                 mailed when a poll gets its first open report (when mail is configured), at most once an hour.</p>
             <p>Off: no link, the form answers 404, and stored reports stay on the Reports tab.</p>
         </OptionHelp>
