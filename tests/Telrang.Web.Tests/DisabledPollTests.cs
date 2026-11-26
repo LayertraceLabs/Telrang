@@ -84,6 +84,11 @@ public class DisabledPollTests
             ["__RequestVerificationToken"] = token,
             ["_handler"] = "vote",
         })));
+        await AssertGoneAsync(await anonymous.PostAsync($"/p/{id}/results", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token,
+            ["_handler"] = "close",
+        })));
         var refused = await SubmitRankedAsync(factory, id, VisitorContext.ForUser(voterId), new RankedBallot([], []));
         Assert.Equal(SubmitStatus.Denied, refused.Status);
         Assert.Contains(PollAccessService.UnavailableMessage, refused.Errors);
@@ -109,6 +114,7 @@ public class DisabledPollTests
         var results = await (await GetPageAsync(browser, $"/p/{id}/results")).Content.ReadAsStringAsync();
         Assert.Contains(">Disabled<", results);
         Assert.DoesNotContain("Reopen poll", results);
+        Assert.DoesNotContain("polls/new?from=", html + results);
         Assert.Contains(">Disabled<", await (await GetPageAsync(browser, "/polls")).Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync($"/p/{id}/look.css")).StatusCode);
 
@@ -121,6 +127,7 @@ public class DisabledPollTests
             await WithScope(factory, sp => sp.GetRequiredService<PollService>().ChangeClosedAsync(owner, id, false)));
         var invites = await WithScope(factory, sp => sp.GetRequiredService<PollService>().GenerateInvitesCheckedAsync(owner, id, 2, []));
         Assert.Equal(PollAccessService.DisabledMessage, invites.Error);
+        Assert.Null(await WithScope(factory, sp => sp.GetRequiredService<PollService>().GetCopyWithLookAsync(owner, id)));
         var key = (await WithScope(factory, sp => sp.GetRequiredService<PollService>().GetForEditAsync(owner, id)))!.Definition.Questions[0].Options[0].Key;
         Assert.Equal(SubmitStatus.Denied, (await SubmitRankedAsync(factory, id, VisitorContext.ForUser(owner), new RankedBallot([key], []))).Status);
 

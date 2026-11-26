@@ -55,7 +55,11 @@ else if (access is { } a)
         <div class="owner-bar d-flex flex-wrap align-items-center gap-2 mb-3">
             <span class="badge text-bg-info">Your poll</span>
             <span class="small"><a href="polls/@a.EncodedId/edit">Edit</a> · <a href="polls/@a.EncodedId/share">Share</a>
-                · <a href="polls/new?from=@a.EncodedId">Copy</a> · <a href="p/@a.EncodedId" data-enhance-nav="false">Open poll</a></span>
+                @if (!a.IsDisabled)
+                {
+                    <span>· <a href="polls/new?from=@a.EncodedId">Copy</a></span>
+                }
+                · <a href="p/@a.EncodedId" data-enhance-nav="false">Open poll</a></span>
             @* The same rule as the share page: Reopen after a manual close, Close while open, nothing when the date closed it. *@
             @if (ShowsReopen)
             {
