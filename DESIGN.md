@@ -1586,6 +1586,10 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   miss the ballots of the last moment. Accepted: counting under the lock makes every vote on the instance wait behind a large edit. The race
   test asserted the exact count and failed on slow CI runners; it now asserts the removal is logged with at most the
   ballots that name the option.
+- 2026-11-26 (0.4 security review before the first push): three fixes. A disabled poll cannot be copied (the copy
+  would republish the content under a new id; the Copy links are hidden). The cap on open reports in all no longer
+  drops a poll's first open report, so flooding other polls cannot hide one, and a dropped report logs a warning.
+  Reading a stored response for the vote page parses its payload once, not twice per question.
 
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
@@ -3225,12 +3229,13 @@ both sets). Choices made on the way:
 - The report page is static, on `PublicLayout` and the `?admin=1` stylesheet, never with the poll's look: a complaint
   channel must stay usable whatever the styling does. The link is hidden from the poll's owner.
 - Limits: 3 reports per minute per client key (an abuse signal beyond), 20 open reports per poll and 1 000 in all;
-  beyond the caps a report is accepted to the visitor but not stored, and the answer never says which.
+  beyond the caps a report is accepted to the visitor but not stored, and the answer never says which. The cap in all
+  never drops a poll's first open report, so reports of other polls cannot hide a poll.
 - States: disabling marks a poll's open reports acted, enabling reopens them, dismissing works per poll and erases text
   and contact. Disable and Enable are also on the Polls tab.
 - A disabled poll answers 410 on every `/p/{id}` route (vote, results, live stream, `look.css`, report). Admins see it
-  read-only as a visitor would see an enabled poll, without the CSV. The owner cannot edit, reopen or add invite links
-  ("Disabled by an admin."), and can still close, export and delete it.
+  read-only as a visitor would see an enabled poll, without the CSV. The owner cannot edit, reopen, add invite links
+  or copy it ("Disabled by an admin."), and can still close, export and delete it.
 - Mails: admins get at most one mail an hour about new reports; the owner's mail about a disabled poll holds nothing
   from any report.
 
