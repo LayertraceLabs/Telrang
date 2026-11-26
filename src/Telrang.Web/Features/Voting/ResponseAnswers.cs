@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Telrang.Core.Ballots;
 using Telrang.Core.Polls;
@@ -41,27 +42,31 @@ public static class ResponseAnswers
     {
         ArgumentNullException.ThrowIfNull(def);
         var answers = new Dictionary<string, QuestionAnswer>(StringComparer.Ordinal);
+        // One parse for the whole payload, whatever the number of questions: this runs on every request of the vote page.
+        using var doc = JsonDocument.Parse(payloadJson);
         foreach (var q in def.Questions)
         {
-            if (Read(q, payloadJson, texts) is { } a) answers[q.Key] = a;
+            if (Read(q, doc.RootElement, texts) is { } a) answers[q.Key] = a;
         }
         return answers;
     }
 
-    private static QuestionAnswer? Read(PollQuestion q, string json, IReadOnlyDictionary<string, string>? texts)
+    private static QuestionAnswer? Read(PollQuestion q, JsonElement root, IReadOnlyDictionary<string, string>? texts)
     {
+        var has = PollJson.TryPart(root, q.Key, out var part);
         switch (q.Type)
         {
             case PollType.Ranked:
-                return PollJson.HasPart(json, q.Key) ? new QuestionAnswer { Ranked = PollJson.ReadRanked(json, q) } : null;
+                return has ? new QuestionAnswer { Ranked = BallotFilter.For(q).Filter(PollJson.RankedFrom(part)) } : null;
             case PollType.Points:
-                return PollJson.HasPart(json, q.Key) ? new QuestionAnswer { Points = PollJson.ReadPoints(json, q) } : null;
+                return has ? new QuestionAnswer { Points = BallotFilter.For(q).Filter(PollJson.PointsFrom(part)) } : null;
             case PollType.Dates:
-                return PollJson.HasPart(json, q.Key) ? new QuestionAnswer { Dates = PollJson.ReadDates(json, q) } : null;
+                return has ? new QuestionAnswer { Dates = BallotFilter.For(q).Filter(PollJson.DatesFrom(part)) } : null;
             case PollType.Choice:
             {
-                if (!PollJson.HasPart(json, q.Key)) return null;
-                var c = PollJson.ReadChoice(json, q);
+                if (!has) return null;
+                var c = BallotFilter.For(q).Filter(PollJson.ChoiceFrom(part));
+                if (c.Other && !q.AllowOther) c = c with { Other = false };
                 var other = c.Other ? texts?.GetValueOrDefault(ResponseText.OtherKey(q)) : null;
                 return new QuestionAnswer { Choice = c, OtherText = other };
             }
@@ -70,7 +75,7 @@ public static class ResponseAnswers
                     ? new QuestionAnswer { Text = t }
                     : null;
             case PollType.Number:
-                return PollJson.ReadNumber(json, q) is { } n ? new QuestionAnswer { Number = n } : null;
+                return has && PollJson.NumberFrom(part) is { } n ? new QuestionAnswer { Number = n } : null;
             default:
                 throw new ArgumentOutOfRangeException(nameof(q), q.Type, null);
         }
