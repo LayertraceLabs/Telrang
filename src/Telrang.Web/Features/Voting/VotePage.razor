@@ -50,7 +50,12 @@ else if (access is { } a)
     @if (a.IsOwner)
     {
         <p class="small"><span class="badge text-bg-info">Your poll</span>
-            <a href="polls/@a.EncodedId/edit">Edit</a> · <a href="polls/@a.EncodedId/share">Share</a> · <a href="polls/new?from=@a.EncodedId">Copy</a></p>
+            <a href="polls/@a.EncodedId/edit">Edit</a> · <a href="polls/@a.EncodedId/share">Share</a>
+            @if (!a.IsDisabled)
+            {
+                <span>· <a href="polls/new?from=@a.EncodedId">Copy</a></span>
+            }
+        </p>
     }
     @if (!string.IsNullOrWhiteSpace(d.DescriptionMarkdown))
     {

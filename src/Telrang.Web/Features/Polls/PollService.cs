@@ -428,8 +428,8 @@ public sealed class PollService(
     /// "Copy" (DESIGN.md §20.2): the form model of one of the caller's polls, for a new poll. Everything the definition
     /// holds is copied (title, description, settings, options); the close date only while it is still ahead and within
     /// the caller's max duration from now. Ballots, invite links, aliases and the closed state are not part of a
-    /// definition, so they never come along; neither do option keys. The change log stays with the poll. Null when not found or
-    /// not the caller's.
+    /// definition, so they never come along; neither do option keys. The change log stays with the poll. Null when not found,
+    /// not the caller's, or disabled by an admin.
     /// </summary>
     public async Task<PollDraft?> GetCopyAsync(string userId, string encodedId, CancellationToken ct = default) =>
         (await GetCopyWithLookAsync(userId, encodedId, ct))?.Draft;
@@ -440,7 +440,8 @@ public sealed class PollService(
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         if (!await AccountGate.MayActAsync(db, userId, ct)) return null;
         var a = await access.GetAsync(db, encodedId, VisitorContext.ForUser(userId), tracking: false, ct);
-        if (a is null || !a.CanEdit) return null;
+        // A disabled poll is not copied either (DESIGN.md §34.8): a copy would put the same content back under a new id.
+        if (a is null || !a.CanEdit || a.IsDisabled) return null;
         var draft = PollDraft.FromDefinition(a.Definition);
         // A copy is a new poll: its questions and options get their own keys (DESIGN.md §26, §34.2).
         foreach (var q in draft.Questions) q.Key = null;
