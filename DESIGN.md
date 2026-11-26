@@ -1573,6 +1573,13 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   later migration). A database error during the live stream's recheck ends the stream with an Information line, not a
   failed request per open stream.
 
+- 2026-11-26 (change log counts): the ballot count on a removal ("removed (on 7 ballots)") is read outside the writer
+  lock (pentest round 3) and re-read when ballots arrived before the write, three times at most; the last attempt
+  writes regardless. Under votes that keep arriving through all three, the count is that of the last read and can
+  miss the ballots of the last moment. Accepted: counting under the lock makes every vote on the instance wait behind a large edit. The race
+  test asserted the exact count and failed on slow CI runners; it now asserts the removal is logged with at most the
+  ballots that name the option.
+
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
 Status: **[5a done]** marks what Phase 5a implemented (details and deviations in §13, "phase 5a").

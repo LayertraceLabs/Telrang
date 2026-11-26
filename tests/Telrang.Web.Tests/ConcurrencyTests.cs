@@ -91,7 +91,10 @@ public class ConcurrencyTests
 
     /// <summary>
     /// An edit that removes an option races the first votes. The change log starts with the first ballot (DESIGN.md §26):
-    /// whenever a stored ballot names the removed option, the edit saw that ballot and logged the removal.
+    /// whenever a stored ballot names the removed option, the edit saw a ballot and logged the removal. The logged count
+    /// is the one the edit read outside the writer lock (pentest round 3: the parse must not hold it); when votes keep
+    /// landing through every attempt the last one writes with that count, so it can be short by the votes of that
+    /// moment (here never over: no ballot is revised or deleted).
     /// </summary>
     [Fact]
     public async Task An_edit_racing_the_first_votes_never_loses_the_change_log()
@@ -116,7 +119,7 @@ public class ConcurrencyTests
             {
                 var removed = Assert.Single(changes);
                 Assert.Equal(OptionChangeKind.Removed, removed.Kind);
-                Assert.Equal(namingPizza, removed.BallotCount);
+                Assert.InRange(removed.BallotCount ?? -1, 0, namingPizza);
             }
             else Assert.Empty(changes);
         }
