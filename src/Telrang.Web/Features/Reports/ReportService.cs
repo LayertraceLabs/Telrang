@@ -48,7 +48,7 @@ public sealed class ReportService(
     /// <summary>Open reports kept per poll; further ones are not stored.</summary>
     public const int MaxOpenPerPoll = 20;
 
-    /// <summary>Open reports kept in all.</summary>
+    /// <summary>Open reports kept in all; beyond it only a poll's first open report is still stored.</summary>
     public const int MaxOpen = 1000;
 
     public const string CategoryMessage = "Choose a category.";
@@ -103,9 +103,12 @@ public sealed class ReportService(
         {
             var pollId = a.Poll.Id;
             var openForPoll = await db.PollReports.CountAsync(r => r.PollId == pollId && r.State == ReportState.Open, ct);
-            if (openForPoll >= MaxOpenPerPoll || await db.PollReports.CountAsync(r => r.State == ReportState.Open, ct) >= MaxOpen)
+            // The cap in all never drops a poll's first open report: filling it with reports of other polls cannot
+            // hide a poll from the admins.
+            if (openForPoll >= MaxOpenPerPoll
+                || (openForPoll > 0 && await db.PollReports.CountAsync(r => r.State == ReportState.Open, ct) >= MaxOpen))
             {
-                logger.LogInformation("Report not stored: the open reports are at their limit.");
+                logger.LogWarning("Report not stored: the open reports are at their limit.");
                 return ReportResult.Sent;
             }
             db.PollReports.Add(new PollReport

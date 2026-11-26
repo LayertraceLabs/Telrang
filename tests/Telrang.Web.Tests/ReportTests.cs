@@ -153,7 +153,8 @@ public class ReportTests
         for (var i = 0; i < ReportService.MaxOpenPerPoll + 3; i++) Assert.Equal(ReportStatus.Sent, (await SubmitAsync(factory, id, text: "flood " + i)).Status);
         Assert.Equal(ReportService.MaxOpenPerPoll, (await ReportsAsync(factory)).Count);
 
-        // In all: filled up with rows of the other poll, a new report of a third is accepted and not stored.
+        // In all: filled up with rows of the other poll. A third poll's first report is still stored (the cap in all cannot
+        // hide a poll), its second is accepted and not stored.
         await WithScope(factory, async sp =>
         {
             var db = sp.GetRequiredService<ApplicationDbContext>();
@@ -163,7 +164,9 @@ public class ReportTests
         });
         var third = await CreatePollAsync(factory, owner, RankedDraft().Titled("Third"));
         Assert.Equal(ReportStatus.Sent, (await SubmitAsync(factory, third)).Status);
-        Assert.Equal(ReportService.MaxOpen, (await ReportsAsync(factory)).Count);
+        Assert.Equal(ReportService.MaxOpen + 1, (await ReportsAsync(factory)).Count);
+        Assert.Equal(ReportStatus.Sent, (await SubmitAsync(factory, third)).Status);
+        Assert.Equal(ReportService.MaxOpen + 1, (await ReportsAsync(factory)).Count);
     }
 
     [Fact]
