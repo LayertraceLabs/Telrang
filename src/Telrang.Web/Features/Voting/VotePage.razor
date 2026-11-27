@@ -16,7 +16,13 @@
 @inject SettingsService Settings
 @inject NavigationManager Nav
 
-@if (access is { } a)
+@if (gone)
+{
+    @* PollGone: the 404 comes from the Not found page; the forms only let the post reach it. *@
+    <form method="post" action="@FormAction" @formname="@VoteForm" @onsubmit="VoteAsync" hidden></form>
+    <form method="post" action="@FormAction" @formname="@DeleteForm" @onsubmit="DeleteAsync" hidden></form>
+}
+else if (access is { } a)
 {
     <PageTitle>@a.Definition.Title - @AppOptions.Value.Name</PageTitle>
 
@@ -237,6 +243,7 @@
     private PollAccess? access;
     private VisitorContext visitor = VisitorContext.ForUser(null);
     private bool isPost, signedIn, canNotify;
+    private bool gone; // a form posted to a poll deleted meanwhile (PollGone)
     private string? captchaKey;
     private string zone = PollTime.Utc;
     private IReadOnlyList<MyBallot>? own;
@@ -299,6 +306,7 @@
         }
 
         access = await AccessService.GetAsync(Id, visitor, Http.RequestAborted);
+        if (access is null && isPost) { gone = true; PollGone.Answer(Http); return; }
         if (access is null) { Nav.NotFound(); return; }
         signedIn = userId is not null;
 
