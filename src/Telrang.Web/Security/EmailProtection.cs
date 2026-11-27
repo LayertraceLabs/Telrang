@@ -150,7 +150,9 @@ public static class SecretFiles
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         var key = RandomNumberGenerator.GetBytes(32);
         var tmp = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllBytes(tmp, protector.Protect(key));
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite; // 0600, like the key directory
+        using (var stream = new FileStream(tmp, options)) stream.Write(protector.Protect(key));
         try
         {
             File.Move(tmp, file, overwrite: false);

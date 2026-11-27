@@ -215,6 +215,9 @@ public class SecurityTests
             }
             SqliteConnection.ClearAllPools();
             Assert.True(File.Exists(Path.Combine(dir, "keys", "voterkey")));
+            if (!OperatingSystem.IsWindows())
+                foreach (var secret in new[] { "voterkey", "emailkey" }) // owner-only, like the key directory
+                    Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(dir, "keys", secret)));
 
             await using (var restarted = new AppFactory(settings))
             {
