@@ -1655,6 +1655,9 @@ button.dates-cell:hover:not(:disabled) { border-color: var(--av-primary); }
 /* One column per ballot (ranked, points) or row per ballot (dates); the first column stays put while the table scrolls
    sideways. Cells keep the table's own background (--bs-table-bg, from the surface token), so nothing shows through. */
 .ballots-scroll { max-width: 100%; }
+/* Tables that scroll sideways on phones (ballots, dates grid, results): a thin scrollbar in the theme's colours. The
+   default one showed as a white bar under the table in dark mode (Firefox, 390 px). */
+.table-responsive { scrollbar-width: thin; scrollbar-color: var(--av-border-strong) transparent; }
 .ballots-table, .ballots-scroll .dates-grid { width: auto; }
 .ballots-scroll .ballots-sticky {
     position: sticky;
