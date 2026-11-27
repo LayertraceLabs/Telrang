@@ -99,6 +99,34 @@ public class DisabledPollTests
     }
 
     [Fact]
+    public async Task Forms_posted_to_a_poll_deleted_meanwhile_answer_404_with_one_line()
+    {
+        await using var factory = new AppFactory();
+        var owner = await CreateUserAsync(factory, "owner@example.com");
+        var id = await CreatePollAsync(factory, owner, RankedDraft());
+        var visitor = factory.CreateBrowser();
+        await visitor.GetAsync($"/p/{id}"); // the voter cookie, as when the page was opened
+        var reportPage = await (await visitor.GetAsync($"/p/{id}/report")).Content.ReadAsStringAsync();
+        var token = AppFactory.ScrapeAntiforgeryToken(reportPage);
+        var stamp = AppFactory.ScrapeFormStamp(reportPage)!; // the report form is guarded (FormGuard)
+        Assert.True(await WithScope(factory, sp => sp.GetRequiredService<PollService>().DeletePollAsync(owner, id)));
+
+        // The vote page was open while the owner deleted the poll: the posts get the line, not an empty 400.
+        foreach (var (path, handler) in new[] { ($"/p/{id}", "vote"), ($"/p/{id}", "delete"), ($"/p/{id}/report", "report") })
+        {
+            var response = await visitor.PostAsync(path, new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = token,
+                ["_handler"] = handler,
+                ["_fts"] = stamp,
+            }));
+            Assert.True(response.StatusCode == HttpStatusCode.NotFound, $"{handler}: {(int)response.StatusCode}");
+            Assert.Contains(PollGone.Message, await response.Content.ReadAsStringAsync());
+        }
+        Assert.Empty(await BallotsAsync(factory, id));
+    }
+
+    [Fact]
     public async Task The_owner_sees_it_disabled_cannot_put_it_back_into_use_and_can_export_and_delete_it()
     {
         await using var factory = new AppFactory();

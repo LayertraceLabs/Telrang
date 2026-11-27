@@ -17,7 +17,13 @@
 @inject NavigationManager Nav
 @inject VoteCarry Carry
 
-@if (access is { Unavailable: true })
+@if (gone)
+{
+    @* PollGone: the 404 comes from the Not found page; the forms only let the post reach it. *@
+    <form method="post" action="@FormAction" @formname="@VoteForm" @onsubmit="VoteAsync" hidden></form>
+    <form method="post" action="@FormAction" @formname="@DeleteForm" @onsubmit="DeleteAsync" hidden></form>
+}
+else if (access is { Unavailable: true })
 {
     <PollUnavailable />
     @if (isPost)
@@ -353,6 +359,7 @@ else if (access is { } a)
     private PollAccess? access;
     private VisitorContext visitor = VisitorContext.ForUser(null);
     private bool isPost, signedIn, canNotify;
+    private bool gone; // a form posted to a poll deleted meanwhile (PollGone)
     private string? captchaKey;
     private string zone = PollTime.Utc;
     private IReadOnlyList<MyBallot>? own;
@@ -439,6 +446,7 @@ else if (access is { } a)
         }
 
         access = await AccessService.GetAsync(Id, visitor, Http.RequestAborted);
+        if (access is null && isPost) { gone = true; PollGone.Answer(Http); return; }
         if (access is null) { Nav.NotFound(); return; }
         if (access.Unavailable) { PollUnavailable.Answer(Http); return; } // DESIGN.md §34.8: 410, nothing of the poll
         signedIn = userId is not null;

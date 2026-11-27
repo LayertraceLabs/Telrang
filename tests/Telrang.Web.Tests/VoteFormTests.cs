@@ -47,6 +47,23 @@ public partial class VoteFormTests
     private static Task<HttpResponseMessage> VoteAsync(HttpClient client, string id, string html, params (string Key, string Value)[] fields) =>
         PostAsync(client, id, html, VotePage.VoteForm, fields.ToDictionary(f => f.Key, f => f.Value));
 
+    [Fact]
+    public async Task A_vote_posted_after_the_poll_was_deleted_gets_the_not_found_page_with_one_line()
+    {
+        await using var factory = new AppFactory();
+        var owner = await CreateUserAsync(factory, "owner@example.com");
+        var id = await CreatePollAsync(factory, owner, RankedDraft());
+        var client = factory.CreateBrowser();
+        var html = await PageAsync(client, $"/p/{id}");
+        Assert.True(await WithScope(factory, sp => sp.GetRequiredService<PollService>().DeletePollAsync(owner, id)));
+
+        // The page was open while the owner deleted the poll; before, the post got an empty 400 ("no form named vote").
+        var response = await VoteAsync(client, id, html);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Contains(PollGone.Message, await response.Content.ReadAsStringAsync());
+        Assert.DoesNotContain(PollGone.Message, await (await client.GetAsync($"/p/{id}")).Content.ReadAsStringAsync()); // GET: the usual hint
+    }
+
     private static async Task<string> ExpectPageAsync(HttpResponseMessage response)
     {
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
