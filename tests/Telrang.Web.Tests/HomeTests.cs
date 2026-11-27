@@ -73,7 +73,7 @@ public partial class HomeTests
         var html = await HomeAsync(factory.CreateBrowser());
 
         AssertStaticShowcase(html);
-        Assert.Contains("Ranked choice, points and date polls, shared by link.", html);
+        Assert.Contains("Ranked choice, points, dates and multi-question forms, shared by link.", html);
         Assert.Contains("href=\"Account/Login\"", html);
         Assert.Contains("href=\"Account/Register\"", html);
         Assert.DoesNotContain(">My polls<", html);

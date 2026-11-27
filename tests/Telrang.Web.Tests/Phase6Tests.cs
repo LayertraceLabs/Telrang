@@ -241,7 +241,7 @@ public partial class Phase6Tests
         await using var factory = new AppFactory();
         var (_, admin) = await AdminAsync(factory);
         var client = factory.CreateClient();
-        const string Default = "Ranked choice, points and date polls, shared by link.";
+        const string Default = "Ranked choice, points, dates and multi-question forms, shared by link.";
         Assert.Contains(Default, await client.GetStringAsync("/"));
 
         Assert.True((await Save(factory, admin, new()

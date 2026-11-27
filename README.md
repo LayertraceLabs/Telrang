@@ -9,9 +9,13 @@ Telrang (Dutch *tel*, count, and *rang*, rank) is a self-hosted voting app for f
 independent alternative to ad-funded poll services. One container, one SQLite file, no tracking.
 
 - **Poll types:** ranked choice (with optional bans), point distribution, and date finding (who can when).
+- **Forms:** several questions in one poll, on pages and in groups. Besides the three poll types there are multiple
+  choice (with "Other"), free text and number questions. Free-text answers are encrypted and only the owner reads them.
 - **Voters need no account.** Polls are reached by an unguessable link, or by personal invite links.
 - **Results:** shown to the owner only, to voters after they vote, or to everyone. The owner's results page updates
   live.
+- **Looks:** each poll can have its own colours, font and corner radius, chosen from validated settings (no custom CSS).
+- **Reports:** visitors can report a poll. Admins can disable it, and while it is disabled it answers 410.
 - **Works without JavaScript** for voters; the vote page is a plain form.
 - **Admin page:** users, polls, limits, mail (optional), branding and theme, abuse blocks, status, backups.
 - **Security:** 2FA for accounts, passkeys, rate limits, a strict Content Security Policy, and no client IP
