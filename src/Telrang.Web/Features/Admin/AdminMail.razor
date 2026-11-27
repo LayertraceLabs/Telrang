@@ -82,6 +82,10 @@
                     <em>Remove password</em> deletes it. Prefer an app-specific token over an account password.</p>
             </OptionHelp>
             <input id="mail-password" type="password" class="form-control" autocomplete="new-password" placeholder="@(hasPassword ? "unchanged" : "")" @bind="password" />
+            @if (passwordUnreadable)
+            {
+                <div class="small text-danger" role="alert">Enter the password again: these keys cannot read the stored one.</div>
+            }
             @if (hasPassword)
             {
                 <div class="form-check small">
@@ -182,6 +186,7 @@ else
     private string? username;
     private string? password;
     private bool hasPassword;
+    private bool passwordUnreadable; // stored, but encrypted with another key ring (restored without keys/)
     private bool clearPassword;
     private string? fromAddress;
     private string? fromName;
@@ -201,6 +206,9 @@ else
         var m = Settings.Current.Mail;
         (host, port, security, username, hasPassword, fromAddress, fromName) = (m.Host, m.Port, m.Security, m.Username, m.HasPassword, m.FromAddress, m.FromName);
         (hourlyCap, cooldown, dailyMax, configured) = (m.HourlyCap, m.CooldownMinutes, m.DailyMax, m.IsConfigured);
+        // A password the key ring cannot decrypt is not "unchanged": the transport would sign in without one.
+        passwordUnreadable = hasPassword && Settings.GetMailPassword() is null;
+        hasPassword &= !passwordUnreadable;
         password = null;
         clearPassword = false;
         if (await WithAdminAsync((a, c) => a.IsAdminAsync(c)))

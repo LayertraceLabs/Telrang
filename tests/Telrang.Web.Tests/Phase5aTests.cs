@@ -768,6 +768,37 @@ public class Phase5aTests
         Assert.Equal("latest", (await Admin(factory, a => a.ListLogAsync(admin, 0)))!.Value.Rows[0].Action);
     }
 
+    [Fact]
+    public async Task Mail_tab_asks_again_for_a_password_these_keys_cannot_read()
+    {
+        await using var factory = new AppFactory();
+        await AdminAsync(factory);
+        await factory.Settings.SetAsync(new Dictionary<string, string?>
+        {
+            [SettingKeys.MailHost] = "smtp.example.com",
+            [SettingKeys.MailUsername] = "sender",
+            [SettingKeys.MailPassword] = "smtp-token",
+        }, "test");
+        var browser = await LoggedInBrowserAsync(factory, "admin@example.com");
+        var readable = await (await browser.GetAsync("/admin?tab=mail")).Content.ReadAsStringAsync();
+        Assert.Contains("placeholder=\"unchanged\"", readable);
+        Assert.DoesNotContain("cannot read the stored one", readable);
+
+        // Restored without keys/ (docs/deploy/docker.md, "Backup and restore"): the stored value is another key ring's.
+        await WithScope(factory, async sp =>
+        {
+            var db = sp.GetRequiredService<ApplicationDbContext>();
+            var row = await db.AppSettings.SingleAsync(s => s.Key == SettingKeys.MailPassword);
+            row.Value = "CfDJ8-from-another-key-ring";
+            return await db.SaveChangesAsync();
+        });
+        factory.Settings.Invalidate();
+        Assert.Null(factory.Settings.GetMailPassword());
+        var lost = await (await browser.GetAsync("/admin?tab=mail")).Content.ReadAsStringAsync();
+        Assert.Contains("Enter the password again: these keys cannot read the stored one.", lost);
+        Assert.DoesNotContain("placeholder=\"unchanged\"", lost);
+    }
+
     [SqliteOnlyFact] // PostgreSQL: PostgresTests.Backup_tab_points_to_pg_dump_and_the_download_is_gone
     public async Task Admin_tabs_render_and_backup_streams_a_rate_limited_sqlite_file()
     {
