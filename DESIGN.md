@@ -1590,6 +1590,12 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   would republish the content under a new id; the Copy links are hidden). The cap on open reports in all no longer
   drops a poll's first open report, so flooding other polls cannot hide one, and a dropped report logs a warning.
   Reading a stored response for the vote page parses its payload once, not twice per question.
+- 2026-11-27 (go-live checks run locally on 0.3.0 and 0.4.0-rc.2; also in 0.3.1): a vote, delete or report posted to a
+  poll deleted while its page was open answers 404 "This poll no longer exists." (`PollGone`) instead of an empty
+  400; a stored SMTP password the key ring cannot decrypt (a restore without `keys/`) is asked for again instead of
+  counting as kept; the Docker restore and roll-back steps start the database first and always restore `keys/`. On
+  main only: My votes shows times in the account zone, else each poll's (it fell back to UTC); `voterkey` and
+  `emailkey` are created 0600.
 
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
