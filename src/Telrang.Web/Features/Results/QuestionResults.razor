@@ -1,6 +1,7 @@
 @* One question's results (DESIGN.md §34.5), the one switch over the per-type views: the results page renders every
    question through it, a simple poll's only question without a heading. Free text (FreeTextList) only when the page
-   passes the owner's TextsAsync page for this question; nothing here shows a text otherwise. *@
+   passes the owner's TextsAsync page for this question and it holds a text (no empty "Other answers" heading); nothing
+   here shows a text otherwise. *@
 @switch (Question.Type)
 {
     case PollType.Ranked:
@@ -14,7 +15,7 @@
         break;
     case PollType.Choice:
         <ChoiceResultsView Question="Question" Results="Result.Choice!" />
-        @if (Texts is { } other)
+        @if (Texts is { Texts.Count: > 0 } other)
         {
             <FreeTextList Answers="other" PageHref="@PageHref" />
         }
@@ -24,7 +25,7 @@
         break;
     case PollType.Text:
         <p class="small text-secondary mb-2">@PollText.AnswersText(Result.Text!.AnswerCount)</p>
-        @if (Texts is { } answers)
+        @if (Texts is { Texts.Count: > 0 } answers)
         {
             <FreeTextList Answers="answers" PageHref="@PageHref" />
         }

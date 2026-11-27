@@ -252,6 +252,22 @@ public class StructuredResultsTests
     }
 
     [Fact]
+    public async Task Owner_summary_has_no_free_text_block_while_no_text_was_given()
+    {
+        await using var factory = new AppFactory();
+        var owner = await CreateUserAsync(factory, "o@example.com");
+        var id = await CreatePollAsync(factory, owner, OpenSurvey());
+        await SubmitAsync(factory, id, Nobody, Answers(
+            ("q1", new QuestionAnswer { Choice = new ChoiceBallot(["no"]) }),
+            ("q3", new QuestionAnswer { Choice = new ChoiceBallot(["fish"]) })), null);
+        var browser = await LoggedInBrowserAsync(factory, "o@example.com");
+
+        var summary = await PageAsync(browser, $"/p/{id}/results");
+        Assert.Contains("choice-results", summary);
+        Assert.DoesNotContain("free-text-answers", summary); // no empty "Other answers" or "Answers" heading
+    }
+
+    [Fact]
     public async Task Owner_texts_are_paged_and_decrypted_a_page_at_a_time()
     {
         var reads = new TextReads();
