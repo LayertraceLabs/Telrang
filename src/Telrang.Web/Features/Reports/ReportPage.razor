@@ -12,7 +12,12 @@
 @inject UserManager<ApplicationUser> Users
 @inject NavigationManager Nav
 
-@if (access is { Unavailable: true })
+@if (gone)
+{
+    @* PollGone: the 404 comes from the Not found page; the forms only let the post reach it. *@
+    <form method="post" action="@FormAction" @formname="@FormName" @onsubmit="SubmitAsync" hidden></form>
+}
+else if (access is { Unavailable: true })
 {
     <PollUnavailable />
     @if (isPost)
@@ -88,6 +93,7 @@ else if (access is { } a)
 
     private PollAccess? access;
     private bool isPost;
+    private bool gone; // a report posted for a poll deleted meanwhile (PollGone)
     private ReportCategory? chosen;
     private string? text, contact;
     private List<string> errors = [];
@@ -100,6 +106,7 @@ else if (access is { } a)
         isPost = HttpMethods.IsPost(Http.Request.Method);
         // The account only decides whether a disabled poll is the visitor's to see; nothing of it is stored with a report.
         access = await AccessService.GetAsync(Id, VisitorContext.ForUser(Users.GetUserId(Http.User)), Http.RequestAborted);
+        if (access is null && isPost) { gone = true; PollGone.Answer(Http); return; }
         if (access is null) { Nav.NotFound(); return; }
         if (access.Unavailable) PollUnavailable.Answer(Http);
     }
