@@ -187,10 +187,15 @@ public sealed class BallotForm
     /// <summary>Longest number text kept for a re-render (<see cref="NumberBallot.TryParse"/> reads at most 64 characters).</summary>
     private const int NumberBallotMaxText = 64;
 
-    /// <summary>Free text re-rendered as typed, but never far more than the field may hold (the validator refuses longer text).</summary>
+    /// <summary>
+    /// Free text re-rendered as typed, but never far more than the field may hold (the validator refuses longer text), with
+    /// its line breaks as <c>\n</c>: browsers count a break as one character for <c>maxlength</c> and
+    /// <c>minlength</c> but post it as CRLF, so the server's count agrees with the field's only after this.
+    /// </summary>
     private static string? ClipText(string? text, int? max)
     {
         if (text is null) return null;
+        if (text.Contains('\r')) text = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
         var cap = 2 * Math.Max(max ?? 0, PollLimits.Default.TextAnswerMax) + 16;
         return text.Length > cap ? text[..cap] : text;
     }

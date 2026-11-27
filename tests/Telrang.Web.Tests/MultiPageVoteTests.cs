@@ -169,6 +169,66 @@ public partial class MultiPageVoteTests
     }
 
     [Fact]
+    public async Task The_fill_time_counts_from_the_first_page_so_a_quick_last_page_is_not_too_fast()
+    {
+        var clock = new MutableTime(DateTimeOffset.UtcNow);
+        await using var factory = new AppFactory(new Dictionary<string, string?> { ["Abuse:FormMinSeconds"] = "2" },
+            services: s => s.AddSingleton<TimeProvider>(clock));
+        var owner = await CreateUserAsync(factory, "o@example.com");
+        var id = await CreatePollAsync(factory, owner, Survey());
+        var browser = factory.CreateBrowser();
+
+        var page1 = await PageAsync(browser, $"/p/{id}");
+        clock.Now += TimeSpan.FromSeconds(30);
+        var page2 = await OkAsync(await PostAsync(browser, id, page1, VotePage.NavNext, Page1));
+        Assert.Equal(AppFactory.ScrapeFormStamp(page1), AppFactory.ScrapeFormStamp(page2)); // the first page's stamp
+
+        // Submit at once on the last page: 30 s since the form opened, not 0 since page 2 appeared.
+        ExpectSaved(await PostAsync(browser, id, page2, VotePage.NavSubmit, [.. Page2, ("name", "Ann")]), id);
+        Assert.Single(await BallotsAsync(factory, id));
+
+        // A forged stamp is not kept: the next page gets a new one.
+        var other = factory.CreateBrowser();
+        var start = await PageAsync(other, $"/p/{id}");
+        var form = new List<KeyValuePair<string, string>>
+        {
+            new("__RequestVerificationToken", AppFactory.ScrapeAntiforgeryToken(start)),
+            new("_handler", VotePage.VoteForm),
+            new(FormGuard.StampField, "forged"),
+            new(VoteCarry.Field, Carry(start)!),
+            new(VotePage.NavField, VotePage.NavNext),
+        };
+        if (FormIdRegex().Match(start) is { Success: true } f) form.Add(new(BallotForm.FormIdField, f.Groups[1].Value));
+        form.AddRange(Page1.Select(x => new KeyValuePair<string, string>(x.Item1, x.Item2)));
+        var next = await OkAsync(await other.PostAsync($"/p/{id}", new FormUrlEncodedContent(form)));
+        Assert.NotEqual("forged", AppFactory.ScrapeFormStamp(next));
+        Assert.False(string.IsNullOrEmpty(AppFactory.ScrapeFormStamp(next)));
+    }
+
+    [Fact]
+    public async Task Deleting_a_response_deletes_its_draft_so_the_next_response_of_that_number_starts_empty()
+    {
+        await using var factory = new AppFactory();
+        var owner = await CreateUserAsync(factory, "o@example.com");
+        var voterId = await CreateUserAsync(factory, "v@example.com");
+        var id = await CreatePollAsync(factory, owner, Survey().Many());
+        var me = VisitorContext.ForUser(voterId);
+        var coming = StructuredResultsTests.Answers(("q1", new QuestionAnswer { Choice = new ChoiceBallot(["yes"]) }));
+        await StructuredResultsTests.SubmitAsync(factory, id, me, coming, null);
+        await StructuredResultsTests.SubmitAsync(factory, id, me, coming, null);
+        Task<T> Ballots<T>(Func<BallotService, Task<T>> f) => WithScope(factory, sp => f(sp.GetRequiredService<BallotService>()));
+        Assert.True(await Ballots(b => b.SaveDraftAsync(id, me, 2, new CarryState(2, coming, "Old draft"))));
+
+        Assert.True((await Ballots(b => b.DeleteResponseAsync(id, me, 2))).Succeeded);
+        Assert.Empty(await DraftsAsync(factory));
+
+        // A new response gets number 2 again and has no draft.
+        await StructuredResultsTests.SubmitAsync(factory, id, me, coming, null);
+        var access = await WithScope(factory, async sp => (await sp.GetRequiredService<PollAccessService>().GetAsync(id, me))!);
+        Assert.Null(await Ballots(b => b.GetDraftAsync(access, 2)));
+    }
+
+    [Fact]
     public async Task Next_checks_the_page_and_keeps_what_was_typed()
     {
         await using var factory = new AppFactory();
@@ -331,6 +391,37 @@ public partial class MultiPageVoteTests
         Assert.Contains(type switch { PollType.Choice => "Blue", PollType.Text => "Blue, of course", _ => "7" }, summary);
         Assert.Contains(type switch { PollType.Choice => "Your choice", _ => "Your answer" }, summary);
         Assert.Equal(1, (await PollRowAsync(factory, id)).QuestionCount);
+    }
+
+    [Fact]
+    public void The_carry_names_its_page_by_key_so_an_edit_that_renumbers_pages_keeps_the_voter_on_it()
+    {
+        var def = Definition(Survey());
+        var now = DateTimeOffset.UtcNow;
+        var json = VoteCarry.Serialize(def, new CarryState(2, new Dictionary<string, QuestionAnswer>()), now);
+
+        Assert.Equal(2, VoteCarry.Deserialize(def, json, now, null)!.Page);
+        var reordered = def with { Pages = [def.Pages[1], def.Pages[0]] };
+        Assert.Equal(1, VoteCarry.Deserialize(reordered, json, now, null)!.Page);
+        var removed = def with { Pages = [def.Pages[0]] };
+        Assert.Equal(1, VoteCarry.Deserialize(removed, json, now, null)!.Page); // its page is gone: the first
+    }
+
+    [Fact]
+    public async Task A_line_break_counts_as_one_character_as_the_browsers_maxlength_counts_it()
+    {
+        await using var factory = new AppFactory();
+        var owner = await CreateUserAsync(factory, "o@example.com");
+        var q = new QuestionDraft { Type = PollType.Text, Multiline = true, MaxLength = 5 };
+        var id = await CreatePollAsync(factory, owner, new PollDraft { Title = "Lines", Questions = [q] });
+        var browser = factory.CreateBrowser();
+        var html = await PageAsync(browser, $"/p/{id}");
+
+        // Five characters in the textarea; the browser posts the break as CRLF (six).
+        ExpectSaved(await PostAsync(browser, id, html, null, ("text", "ab\r\ncd")), id);
+        var row = Assert.Single(await BallotsAsync(factory, id));
+        var texts = factory.Services.GetRequiredService<ResponseTextProtection>().RevealTexts(row.PollId, row.TextCipher)!;
+        Assert.Equal("ab\ncd", Assert.Single(texts.Values));
     }
 
     private static Task<Poll> PollRowAsync(AppFactory factory, string id)

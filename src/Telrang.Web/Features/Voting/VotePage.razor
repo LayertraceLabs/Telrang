@@ -190,7 +190,7 @@ else if (access is { } a)
                     </div>
                 }
 
-                <FormGuardFields />
+                <FormGuardFields Keep="@formStamp" MaxAge="BallotService.StampMaxAge" />
                 @if (last && captchaKey is not null)
                 {
                     <CaptchaWidget Provider="Settings.Current.Captcha.Provider" SiteKey="@captchaKey" />
@@ -385,6 +385,7 @@ else if (access is { } a)
     /// <summary>The posted carry field did not open (expired, another identity, forged): the form starts over.</summary>
     private bool restart;
     private string? carryField;
+    private string? formStamp; // multi-page: the form stamp posted with the previous page
     private ResponseDraftState? draft;
     private bool draftNotice;
     private int textMax = PollLimits.Default.TextAnswerMax;
@@ -510,6 +511,9 @@ else if (access is { } a)
             editing = many ? BallotForm.ResponseNo(form) : responses.FirstOrDefault()?.ResponseNo;
             if (multiPage)
             {
+                // The stamp of the form's first page stays on every page, so the minimum fill time counts from the start
+                // and a short last page is not "too fast" (FormGuardFields keeps it while it is valid).
+                formStamp = BallotForm.Value(form, FormGuard.StampField);
                 // The carry field opens only for this voter, poll and response (DESIGN.md §34.4); its page is the page the
                 // posted fields belong to. A field that does not open starts the form over (the vote handler says so).
                 var opened = access.Voter is { } voter ? Carry.Open(pollId, voter, editing ?? 0, def, BallotForm.Value(form, VoteCarry.Field)) : null;
