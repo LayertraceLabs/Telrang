@@ -4,6 +4,7 @@
 // fields under the question's prefix), carries page 1 to page 2 and submits; the owner's results show both questions
 // and the ballots CSV holds exactly those answers. The structured-draft flow edits this poll.
 import { formAge } from './setup.mjs';
+import { addFromSimple } from './structured-editor.mjs';
 
 export const name = 'structured-dates';
 
@@ -44,8 +45,7 @@ export async function run({ app, browser, state, check, defer }) {
   await admin.waitFor(`!!document.querySelector('.editor-form .editor-help-row button')`, 'the editor');
   await admin.fill(field('title'), 'Team outing (e2e)');
   await options(admin, ['Lake', 'Forest', 'Museum']);
-  await admin.clickText('Add group', '.editor-addbar button');
-  await admin.waitFor(`!!document.querySelector('.editor-outline')`, 'the outline');
+  await addFromSimple(admin, 'Add group');
   await waitPlace(admin, 'Group: Group 1 · Question 2 of 2');
   await admin.clickText('Dates', '[aria-label="Question type"] label');
   await admin.waitFor(`!!document.querySelector('.editor-item .editor-calendar')`, 'the calendar of the dates question');
