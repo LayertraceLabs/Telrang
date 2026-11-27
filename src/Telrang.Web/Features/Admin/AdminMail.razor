@@ -46,14 +46,14 @@
             </OptionHelp>
             <input id="mail-host" class="form-control" placeholder="smtp.example.com" autocomplete="off" @bind="host" />
         </div>
-        <div class="col-6 col-md-2 option-field">
+        <div class="col-6 col-md-3 col-xl-2 option-field">
             <label for="mail-port" class="form-label small mb-0">Port</label>
             <OptionHelp Label="Port">
                 <p>Default 587 (submission with STARTTLS). 465 is usual for implicit TLS, 25 for a relay without login.</p>
             </OptionHelp>
             <input id="mail-port" type="number" min="1" max="65535" class="form-control" @bind="port" />
         </div>
-        <div class="col-6 col-md-4 option-field">
+        <div class="col-6 col-md-3 col-xl-4 option-field">
             <label for="mail-security" class="form-label small mb-0">Security</label>
             <OptionHelp Label="Security">
                 <p>STARTTLS (the default): the connection is upgraded to TLS, and nothing is sent if the server does not offer
