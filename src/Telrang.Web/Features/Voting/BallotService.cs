@@ -60,7 +60,7 @@ public sealed record VoteState(PollAccess Access, IReadOnlyList<MyBallot> Respon
 /// <param name="Revoked">Invite poll whose invitation the owner withdrew: the ballot still counts and is the account's
 /// data (export), but the account can no longer open it, so the page lists it without links.</param>
 public sealed record MyVoteSummary(string EncodedId, string Title, PollType Type, bool IsClosed, int ResponseCount,
-    DateTimeOffset LastUpdated, bool ResultsLink, bool Revoked = false, int QuestionCount = 1, int PageCount = 1)
+    DateTimeOffset LastUpdated, bool ResultsLink, bool Revoked = false, int QuestionCount = 1, int PageCount = 1, string? TimeZone = null)
 {
     /// <summary>The type of a simple poll, the size of a structured one (DESIGN.md §34.1).</summary>
     public string Kind => PollText.KindLine(Type, QuestionCount, PageCount);
@@ -466,7 +466,7 @@ public sealed class BallotService(
             // Invite poll and the account holds no ballot as itself: its ballots were detached by a revoke.
             var revoked = a.Poll.VoterMode == VoterMode.Invite && !a.HasBallot && !a.IsOwner;
             result.Add(new MyVoteSummary(a.EncodedId, a.Definition.Title, a.Definition.Questions[0].Type, a.IsClosed, group.Count(),
-                group.Max(r => r.UpdatedAt), a.CanSeeResults && !revoked, revoked, a.Definition.Questions.Count, Math.Max(1, a.Definition.Pages.Count)));
+                group.Max(r => r.UpdatedAt), a.CanSeeResults && !revoked, revoked, a.Definition.Questions.Count, Math.Max(1, a.Definition.Pages.Count), a.Definition.TimeZone));
         }
         // DateTimeOffset ordering in memory: SQLite cannot ORDER BY it.
         return result.OrderByDescending(r => r.LastUpdated).ToList();

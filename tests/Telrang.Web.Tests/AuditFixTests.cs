@@ -502,6 +502,33 @@ public class AuditFixTests
         Assert.DoesNotContain($"href=\"p/{id}", html);
     }
 
+    [Fact]
+    public async Task My_votes_shows_times_in_the_account_zone_else_the_poll_zone()
+    {
+        await using var factory = new AppFactory();
+        var owner = await CreateUserAsync(factory, "o@example.com");
+        var me = await CreateUserAsync(factory, "me@example.com");
+        var id = await CreatePollAsync(factory, owner, Draft().Zone("Asia/Tokyo"));
+        Assert.True((await SubmitAsync(factory, id, new VisitorContext(me, null, null), ParisFirst)).Succeeded);
+        var (browser, _) = await SignedInBrowserAsync(factory, "me@example.com");
+
+        var html = await PageAsync(browser, "/my/votes");
+        Assert.Contains("Asia/Tokyo", html); // no account zone: the poll's, not UTC
+        Assert.DoesNotContain(" UTC", html);
+
+        await WithScope(factory, async sp =>
+        {
+            var users = sp.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = (await users.FindByIdAsync(me))!;
+            user.TimeZone = "Europe/Berlin";
+            Assert.True((await users.UpdateAsync(user)).Succeeded);
+            return 0;
+        });
+        html = await PageAsync(browser, "/my/votes");
+        Assert.Contains("Europe/Berlin", html);
+        Assert.DoesNotContain("Asia/Tokyo", html);
+    }
+
     // ---- DEAD END 12: transferred poll beyond the new owner's limit ----------------------------------------
 
     [Fact]
