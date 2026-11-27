@@ -137,7 +137,7 @@ below run there.
    ```sh
    docker network create --subnet 172.31.255.0/29 --ip-range 172.31.255.4/30 telrang-proxy
    ```
-   `--ip-range` hands out `.4`–`.7` to containers without a fixed address (Telrang), so `.2` stays free for NPM even
+   `--ip-range` limits containers without a fixed address (Telrang) to `.5` and `.6`, so `.2` stays free for NPM even
    when Telrang starts first. With another subnet, also change `NPM_ADDRESS` (the default `172.31.255.2` in
    `compose.npm.yml`) and the address below.
 2. **NPM joins it with the fixed address.** In NPM's own compose file (the service may have another name):
@@ -304,8 +304,8 @@ password gone; `branding/`).
 cd /srv/telrang
 umask 077     # both files 0600: the archive holds the key ring
 docker compose -f compose.npm.yml exec -T db pg_dump -U telrang -d telrang -Fc > telrang-$(date +%F).dump
-docker run --rm -v telrang_app-data:/data:ro -v "$PWD":/backup debian:stable-slim \
-  sh -c 'umask 077 && tar czf /backup/telrang-data-$(date +%F).tgz -C /data .'
+docker run --rm -e OWNER="$(id -u):$(id -g)" -v telrang_app-data:/data:ro -v "$PWD":/backup debian:stable-slim \
+  sh -c 'umask 077 && f=/backup/telrang-data-$(date +%F).tgz && tar czf "$f" -C /data . && chown "$OWNER" "$f"'
 ```
 
 The dump is consistent while the app runs. Keep the two apart and as private as the server (the dump holds password
@@ -314,14 +314,20 @@ hashes and voter names; the volume the keys that decrypt the rest).
 Restore (new host or after a loss): set up as above with the same secrets files, then
 
 ```sh
-docker compose -f compose.npm.yml up -d db
+docker compose -f compose.npm.yml up -d --wait db   # returns once PostgreSQL has created the role and the database
+docker compose -f compose.npm.yml create app        # creates the app-data volume; the app does not start yet
 docker run --rm -v telrang_app-data:/data -v "$PWD":/backup debian:stable-slim \
   sh -c 'tar xzf /backup/telrang-data-2026-11-02.tgz -C /data && chown -R 1654:1654 /data && chmod 700 /data'
 docker compose -f compose.npm.yml exec -T db pg_restore -U telrang -d telrang --no-owner < telrang-2026-11-02.dump
 docker compose -f compose.npm.yml up -d
 ```
 
-(`pg_restore` into the database the first start created, which is still empty because the app has not run.)
+(`pg_restore` into the database the first start created, which is still empty because the app has not run. If the
+app did start on it first, it migrated the empty database and the restore fails: remove it and begin again with
+`docker compose -f compose.npm.yml rm -sf app db && docker volume rm telrang_db-data`.)
+
+Restore `keys/` with the dump, always: without the key ring the instance is unusable, not only without its SMTP
+password, because no email address in the dump can be read and nobody can sign in.
 
 **PostgreSQL major versions** (17 → 18) do not read each other's data directory: never only change the image tag.
 Dump, stop, remove the `db-data` volume, start the new version (the init creates role and database again), restore the
@@ -341,7 +347,9 @@ In a stack manager such as Portainer: load and tag the image on the host as abov
 app is skipped, PostgreSQL is pulled); the new `latest` is used because the container is recreated when its image
 changes.
 
-Going back to the old version after a migration needs the backup: tag the old image `latest` again, restore the dump.
+Going back to the old version after a migration needs the backup of before the update: tag the old image `latest`
+again, `docker compose -f compose.npm.yml rm -sf app db && docker volume rm telrang_db-data`, then the restore steps
+above with that backup's archive and dump. A dump does not restore over the migrated database.
 
 ### From an existing SQLite instance
 
