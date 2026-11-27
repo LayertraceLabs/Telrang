@@ -11,5 +11,18 @@
     private readonly string id = "hp-" + Guid.NewGuid().ToString("N")[..8];
     private string stamp = "";
 
-    protected override void OnInitialized() => stamp = Guard.CreateStamp();
+    /// <summary>A stamp posted with an earlier page of the same form (a multi-page vote): rendered again while it is valid,
+    /// so the fill time counts from the first page. Forged or expired: a new one.</summary>
+    [Parameter] public string? Keep { get; set; }
+
+    /// <summary>Oldest <see cref="Keep"/> stamp reused; null = <c>Abuse:FormMaxMinutes</c>.</summary>
+    [Parameter] public TimeSpan? MaxAge { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (Keep is { Length: > 0 } kept && Guard.Check(null, kept, MaxAge) is Telrang.Web.Security.FormCheck.Ok or Telrang.Web.Security.FormCheck.TooFast)
+            stamp = kept;
+        else if (stamp.Length == 0)
+            stamp = Guard.CreateStamp();
+    }
 }

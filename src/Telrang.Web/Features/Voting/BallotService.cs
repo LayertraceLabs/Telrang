@@ -438,6 +438,12 @@ public sealed class BallotService(
         }
         db.Ballots.Remove(row);
         await db.SaveChangesAsync(ct);
+        // The response's draft goes with it: a later response gets this number again and must not find it (DESIGN.md §34.4).
+        if (a.Voter.Kind == VoterKind.Account)
+        {
+            var (pid, uid) = (a.Poll.Id, a.Voter.Key);
+            await db.ResponseDrafts.Where(d => d.PollId == pid && d.UserId == uid && d.ResponseNo == responseNo).ExecuteDeleteAsync(ct);
+        }
         await tx.CommitAsync(ct);
         notifier.Changed(a.Poll.Id);
 
@@ -586,6 +592,10 @@ public sealed class BallotService(
         var pid = a.Poll.Id;
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var row = await db.ResponseDrafts.AsNoTracking().FirstOrDefaultAsync(d => d.PollId == pid && d.UserId == uid && d.ResponseNo == responseNo, ct);
+        // A draft of a response that no longer exists is not shown (one left by a deletion before the draft went with it).
+        var identity = a.Voter.Stored;
+        if (row is not null && responseNo != 0
+            && !await db.Ballots.AnyAsync(b => b.PollId == pid && b.VoterIdentity == identity && b.ResponseNo == responseNo, ct)) return null;
         if (row is null || textProtection.RevealDraft(pid, uid, responseNo, row.Cipher) is not { } plain) return null;
         return VoteCarry.Deserialize(a.Definition, plain, time.GetUtcNow(), null) is { } state ? new ResponseDraftState(state, row.UpdatedAt) : null;
     }

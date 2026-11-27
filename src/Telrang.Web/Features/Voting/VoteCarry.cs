@@ -74,6 +74,8 @@ public sealed class VoteCarry(IDataProtectionProvider dataProtection, TimeProvid
         {
             ["at"] = now.ToUnixTimeSeconds(),
             ["page"] = state.Page,
+            // The page's key too: an edit that adds, removes or moves pages renumbers them, the key stays (DESIGN.md §34.4).
+            ["pk"] = state.Page >= 1 && state.Page <= def.Pages.Count ? def.Pages[state.Page - 1].Key : null,
             ["p"] = JsonNode.Parse(ResponseAnswers.Payload(def, state.Answers)),
             ["t"] = JsonSerializer.SerializeToNode(ResponseAnswers.Texts(def, state.Answers), ResponseTextProtection.Json),
         };
@@ -97,6 +99,12 @@ public sealed class VoteCarry(IDataProtectionProvider dataProtection, TimeProvid
             if (seconds < DateTimeOffset.MinValue.ToUnixTimeSeconds() || seconds > DateTimeOffset.MaxValue.ToUnixTimeSeconds()) return null;
             var issued = DateTimeOffset.FromUnixTimeSeconds(seconds);
             if (lifetime is { } life && (now - issued > life || issued - now > TimeSpan.FromMinutes(5))) return null;
+            if (r.TryGetProperty("pk", out var pk) && pk.ValueKind == JsonValueKind.String)
+            {
+                var key = pk.GetString();
+                var index = def.Pages.ToList().FindIndex(x => x.Key == key);
+                page = index >= 0 ? index + 1 : 1; // the page was removed meanwhile: start at the first
+            }
             var payload = r.TryGetProperty("p", out var p) && p.ValueKind == JsonValueKind.Object ? p.GetRawText() : "{}";
             var texts = new Dictionary<string, string>(StringComparer.Ordinal);
             if (r.TryGetProperty("t", out var t) && t.ValueKind == JsonValueKind.Object)
