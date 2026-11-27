@@ -1596,6 +1596,12 @@ Finding IDs (AV-, R2-, R3-) refer to internal audit and pentest reports; each en
   counting as kept; the Docker restore and roll-back steps start the database first and always restore `keys/`. On
   main only: My votes shows times in the account zone, else each poll's (it fell back to UTC); `voterkey` and
   `emailkey` are created 0600.
+- 2026-11-27 (0.4 correctness review): in a structured poll an empty ranked, points or dates part (nothing ranked or
+  banned, no points, no yes or maybe) is not written and reads as not answered, like an absent key (§34.3); a simple
+  poll keeps counting an empty ballot as a voter. A multi-page form keeps its first page's form stamp on every page
+  (the fill time counts from the start). Deleting a response deletes its draft. Posted text counts a line break as one
+  character (CRLF → LF, as `maxlength` counts). The carry field and drafts hold the page key beside the number; a
+  removed page resumes at page 1.
 
 ## 14. Phase 5 (approved 2026-10-25; 5a, 5b part 1 and 5b part 2 implemented)
 
