@@ -1,0 +1,247 @@
+{
+  "Version": "0.3.1",
+  "GeneratedAt": "2026-11-27T11:38:56.3388769+00:00",
+  "SqliteSchema": "20261102124053_EncryptedEmails",
+  "PostgresSchema": "20261102124057_EncryptedEmails",
+  "Accounts": [
+    {
+      "Id": "53f3266f-acfa-4a69-99fd-28357c9a8f06",
+      "Email": "admin@example.com",
+      "DisplayName": "Ada Admin",
+      "Admin": true,
+      "AuthenticatorKey": null,
+      "RecoveryCodes": []
+    },
+    {
+      "Id": "a6ed122d-ca62-40d1-b53e-4718b4ff4fa3",
+      "Email": "owner@example.com",
+      "DisplayName": "Olive Owner",
+      "Admin": false,
+      "AuthenticatorKey": "SVWIMBDHV7JPLR2VSPLNMR54ELZNZ7OG",
+      "RecoveryCodes": [
+        "NPMRJ-JRVQC",
+        "PKQ3Q-3GNNN",
+        "TP4WF-TBWWK",
+        "RR2HY-PWDT8"
+      ]
+    },
+    {
+      "Id": "d7c8501c-d607-402c-b0af-84b32d3053c4",
+      "Email": "voter@example.com",
+      "DisplayName": "Victor Voter",
+      "Admin": false,
+      "AuthenticatorKey": null,
+      "RecoveryCodes": []
+    },
+    {
+      "Id": "f56526b1-4de7-4f60-b9a2-26c9f8d19583",
+      "Email": "Plain.User@Example.com",
+      "DisplayName": null,
+      "Admin": false,
+      "AuthenticatorKey": null,
+      "RecoveryCodes": []
+    }
+  ],
+  "Polls": [
+    {
+      "Name": "ranked",
+      "Id": "jfQB5TdLt0uHrM2m374izA",
+      "Type": "Ranked",
+      "OwnerEmail": "owner@example.com",
+      "Title": "Trip 2027",
+      "VoterMode": "Public",
+      "Closed": false,
+      "OptionKeys": [
+        "paris",
+        "rome",
+        "_1",
+        "_2"
+      ],
+      "Results": [
+        "voters=5",
+        "_1 score=7 first=1 bans=0 ranks=1,1,0,0",
+        "paris score=7 first=1 bans=1 ranks=1,1,0,0",
+        "_2 score=4 first=1 bans=0 ranks=1,0,0,0",
+        "rome score=4 first=1 bans=1 ranks=1,0,0,0"
+      ],
+      "Changes": [
+        {
+          "Kind": "TitleChanged",
+          "Label": "Trip 2027",
+          "OldLabel": "Trip",
+          "BallotCount": null
+        },
+        {
+          "Kind": "Removed",
+          "Label": "Berlin",
+          "OldLabel": null,
+          "BallotCount": 3
+        },
+        {
+          "Kind": "Renamed",
+          "Label": "Roma",
+          "OldLabel": "Rome",
+          "BallotCount": null
+        },
+        {
+          "Kind": "Added",
+          "Label": "Lisbon",
+          "OldLabel": null,
+          "BallotCount": null
+        },
+        {
+          "Kind": "Added",
+          "Label": "Berlin",
+          "OldLabel": null,
+          "BallotCount": null
+        }
+      ]
+    },
+    {
+      "Name": "points",
+      "Id": "Sf-SYfxhtUK6AXFn6M9bzA",
+      "Type": "Points",
+      "OwnerEmail": "owner@example.com",
+      "Title": "Budget",
+      "VoterMode": "Invite",
+      "Closed": false,
+      "OptionKeys": [
+        "paris",
+        "rome",
+        "berlin"
+      ],
+      "Results": [
+        "voters=2",
+        "rome total=10 mean=5 supporters=2 max=6",
+        "paris total=8 mean=4 supporters=1 max=8",
+        "berlin total=6 mean=3 supporters=1 max=6"
+      ],
+      "Changes": []
+    },
+    {
+      "Name": "dates",
+      "Id": "PApihYso80ySSWetnTyMdg",
+      "Type": "Dates",
+      "OwnerEmail": "owner@example.com",
+      "Title": "Meeting",
+      "VoterMode": "Accounts",
+      "Closed": false,
+      "OptionKeys": [
+        "2030-03-02",
+        "2030-03-03-19-00",
+        "2030-03-04-09-00-11-30"
+      ],
+      "Results": [
+        "voters=3",
+        "2030-03-02 yes=2 maybe=0 no=1 place=2",
+        "2030-03-03-19-00 yes=2 maybe=1 no=0 place=1",
+        "2030-03-04-09-00-11-30 yes=1 maybe=1 no=1 place=3"
+      ],
+      "Changes": []
+    },
+    {
+      "Name": "closed",
+      "Id": "An8vwww050aApPh1wfKsSQ",
+      "Type": "Ranked",
+      "OwnerEmail": "voter@example.com",
+      "Title": "Lunch",
+      "VoterMode": "Public",
+      "Closed": true,
+      "OptionKeys": [
+        "pizza",
+        "sushi",
+        "salad"
+      ],
+      "Results": [
+        "voters=2",
+        "pizza score=5 first=1 bans=0 ranks=1,1,0",
+        "sushi score=3 first=1 bans=0 ranks=1,0,0",
+        "salad score=0 first=0 bans=0 ranks=0,0,0"
+      ],
+      "Changes": []
+    }
+  ],
+  "Invites": [
+    {
+      "Poll": "points",
+      "Token": "sKnPWTwTaGxHwMrHioOgxQ",
+      "Alias": "Aunt Alice",
+      "Used": true,
+      "ClaimedByEmail": null
+    },
+    {
+      "Poll": "points",
+      "Token": "9OtSpFyP0kQhlg4owmX6MA",
+      "Alias": "Uncle Bob",
+      "Used": true,
+      "ClaimedByEmail": "voter@example.com"
+    },
+    {
+      "Poll": "points",
+      "Token": "NJEtSKpfnK89PN0AvKs8Ew",
+      "Alias": null,
+      "Used": false,
+      "ClaimedByEmail": null
+    }
+  ],
+  "CookieVoter": {
+    "Poll": "ranked",
+    "Cookie": "CfDJ8OuqTFbG0V9BgWFGbirQoq5HMusvM-zHEKrfzandm3QiPZr9LZ_7qE1arg8ol6QXtyft9sgbGA6ZxDvvabZv8JLXKoYDJYP-GotH7DE5K2pYoZVbheC5XBB6sXid_BcQrCqocJPGV5Fj7E3zDUG9qZY"
+  },
+  "NotifyEmail": "voter@example.com",
+  "PendingAccountId": "85727540-d797-4a9b-a180-70d726e494fd",
+  "PendingInviteEmail": "invitee@example.com",
+  "SmtpPassword": "fixture-smtp-password",
+  "AppDisplayName": "Fixture Votes",
+  "Settings": {
+    "App.DisplayName": "Fixture Votes",
+    "App.PublicUrl": "https://localhost",
+    "Legal.PageMarkdown": "# Legal\n\nFixture legal page.",
+    "Home.WelcomeMarkdown": "Welcome to the **fixture**.",
+    "Limits.MaxPollDurationDays": "0",
+    "Limits.VoterNameLength": "50",
+    "Theme.LightBase": "#1d4e89",
+    "Theme.LightHighlight": "#f2a541",
+    "Theme.Layout": "sidebar",
+    "Mail.Host": "smtp.example.test",
+    "Mail.Port": "587",
+    "Mail.Security": "StartTls",
+    "Mail.Username": "mailer",
+    "Mail.FromAddress": "vote@example.test",
+    "Mail.FromName": "Fixture Votes"
+  },
+  "BlockedRanges": [
+    "203.0.113.0/24",
+    "198.51.100.0/24"
+  ],
+  "BrandingFiles": [
+    "logo"
+  ],
+  "QueuedMailTo": [
+    "admin@example.com",
+    "voter@example.com"
+  ],
+  "SentMail": 2,
+  "RowCounts": {
+    "AdminActionLogs": 8,
+    "AppSettings": 17,
+    "AspNetRoleClaims": 0,
+    "AspNetRoles": 1,
+    "AspNetUserClaims": 0,
+    "AspNetUserLogins": 0,
+    "AspNetUserPasskeys": 0,
+    "AspNetUserRoles": 1,
+    "AspNetUserTokens": 2,
+    "AspNetUsers": 6,
+    "AuthSessions": 0,
+    "Ballots": 12,
+    "BlockedRanges": 2,
+    "InviteTokens": 3,
+    "OutboxMessages": 4,
+    "PollChanges": 5,
+    "PollCreations": 4,
+    "Polls": 4,
+    "SetupLinks": 4,
+    "WriterLocks": 0
+  }
+}
