@@ -17,7 +17,7 @@
             <a href="polls">My polls</a> · <a href="polls/@Id/edit">Edit</a>
             @if (!a.IsDisabled)
             {
-                <span>· <a href="polls/new?from=@Id">Copy poll</a></span>
+                <span> · <a href="polls/new?from=@Id">Copy poll</a></span>
             }
             · <a href="p/@Id/results" data-enhance-nav="false">Results</a>
             · @o.BallotCount @(o.BallotCount == 1 ? "vote" : "votes")
