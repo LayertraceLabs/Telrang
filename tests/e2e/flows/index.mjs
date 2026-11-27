@@ -7,6 +7,8 @@ import * as structuredEditor from './structured-editor.mjs';
 import * as share from './share.mjs';
 import * as vote from './vote.mjs';
 import * as votePages from './vote-pages.mjs';
+import * as structuredDates from './structured-dates.mjs';
+import * as structuredDraft from './structured-draft.mjs';
 import * as results from './results.mjs';
 import * as edit from './edit.mjs';
 import * as looks from './looks.mjs';
@@ -17,4 +19,4 @@ import * as report from './report.mjs';
 import * as mail from './mail.mjs';
 
 // `when`: a flow that runs only in some setups (mail needs an SMTP server, scripts/npm-stack-test.sh).
-export const flows = [setup, home, editor, datesEditor, structuredEditor, share, vote, votePages, results, edit, looks, theme, signin, admin, report, mail];
+export const flows = [setup, home, editor, datesEditor, structuredEditor, share, vote, votePages, structuredDates, structuredDraft, results, edit, looks, theme, signin, admin, report, mail];

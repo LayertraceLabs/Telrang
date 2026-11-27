@@ -3242,5 +3242,3 @@ both sets). Choices made on the way:
 **Not built, known gaps**
 - No "move to page" control for questions (step buttons only).
 - The simple ranked, points and dates preview still lists options instead of using the vote widgets.
-- Browser flows do not cover the dates calendar inside a structured poll, or restoring a structured browser draft on
-  the edit page.
