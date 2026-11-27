@@ -37,7 +37,7 @@ else
                     }
                 </div>
                 <div class="small text-secondary mb-2">
-                    @v.Kind · @v.ResponseCount @(v.ResponseCount == 1 ? "response" : "responses") · updated @PollTime.Format(v.LastUpdated, zone)
+                    @v.Kind · @v.ResponseCount @(v.ResponseCount == 1 ? "response" : "responses") · updated @PollTime.Format(v.LastUpdated, accountZone ?? v.TimeZone)
                 </div>
                 @if (!v.Revoked)
                 {
@@ -57,12 +57,14 @@ else
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
     private IReadOnlyList<MyVoteSummary>? votes;
-    private string zone = PollTime.Utc;
+    private string? accountZone; // DESIGN.md §24: the account's zone, else each poll's own
 
     protected override async Task OnInitializedAsync()
     {
         if (Users.GetUserId((await AuthState).User) is not { } userId) { votes = []; return; }
-        zone = await Polls.DefaultTimeZoneAsync(userId);
-        votes = await Ballots.ListMyVotesAsync(userId);
+        var zone = await Polls.AccountTimeZoneAsync(userId);
+        var list = await Ballots.ListMyVotesAsync(userId);
+        accountZone = zone;
+        votes = list;
     }
 }
