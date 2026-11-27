@@ -144,22 +144,26 @@ public class SecurityTests
         var browser = factory.CreateBrowser();
         await AppFactory.LoginAsync(browser, "warmup@example.com", "wrong password"); // JIT, first page render
 
-        async Task<double> MedianMs(string email)
+        async Task<double> TimeMs(string email, int i)
         {
-            var times = new List<double>();
-            for (var i = 0; i < 3; i++)
-            {
-                var sw = Stopwatch.StartNew();
-                var response = await AppFactory.LoginAsync(browser, email, "wrong password " + i);
-                sw.Stop();
-                Assert.Contains("Invalid login attempt", await response.Content.ReadAsStringAsync());
-                times.Add(sw.Elapsed.TotalMilliseconds);
-            }
-            return times.Order().ElementAt(1);
+            var sw = Stopwatch.StartNew();
+            var response = await AppFactory.LoginAsync(browser, email, "wrong password " + i);
+            sw.Stop();
+            Assert.Contains("Invalid login attempt", await response.Content.ReadAsStringAsync());
+            return sw.Elapsed.TotalMilliseconds;
         }
 
-        var known = await MedianMs("known@example.com");
-        var unknown = await MedianMs("nobody@example.com");
+        // Interleaved, so a load spike from the tests running alongside hits both sides alike (measured one side after the
+        // other, a spike during the known logins alone failed the check under parallel test load).
+        var knownTimes = new List<double>();
+        var unknownTimes = new List<double>();
+        for (var i = 0; i < 4; i++) // four: the fifth failure would lock the known account
+        {
+            knownTimes.Add(await TimeMs("known@example.com", i));
+            unknownTimes.Add(await TimeMs("nobody@example.com", i));
+        }
+        var known = knownTimes.Order().ElementAt(1);
+        var unknown = unknownTimes.Order().ElementAt(1);
         // Both run one 600k-iteration PBKDF2; without the dummy hash "unknown" is several times faster.
         Assert.True(unknown > known * 0.5, $"unknown {unknown:0} ms vs known {known:0} ms");
     }
