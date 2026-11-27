@@ -158,6 +158,17 @@ public static class PollJson
         return root.ValueKind == JsonValueKind.Object && root.TryGetProperty(questionKey, out part) && part.ValueKind == JsonValueKind.Object;
     }
 
+    /// <summary>
+    /// Whether a ranked, points or dates part says anything: something ranked or banned, points above 0, a yes or maybe.
+    /// In a structured poll an empty part is "not answered" (DESIGN.md §34.3), as an absent key is; a simple poll counts
+    /// an empty ballot as a voter, as before 0.4.
+    /// </summary>
+    public static bool HasAnswer(RankedBallot b) => b.Ranked.Count > 0 || b.Banned.Count > 0;
+
+    public static bool HasAnswer(PointsBallot b) => b.Points.Values.Any(v => v > 0);
+
+    public static bool HasAnswer(DatesBallot b) => b.Answers.Values.Any(v => v is Availability.Yes or Availability.Maybe);
+
     public static RankedBallot RankedFrom(JsonElement part) => part.Deserialize<RankedBallot>(Options) ?? new RankedBallot([], []);
 
     public static PointsBallot PointsFrom(JsonElement part) => part.Deserialize<PointsBallot>(Options) ?? new PointsBallot(new Dictionary<string, int>());
@@ -200,13 +211,13 @@ public static class PollJson
         var questions = def.Questions.ToDictionary(q => q.Key, _ => 0, StringComparer.Ordinal);
         var options = def.Questions.ToDictionary(q => q.Key, q => q.Options.ToDictionary(o => o.Key, _ => 0, StringComparer.Ordinal), StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var simple = Voting.VoteLayout.IsSimple(def);
         foreach (var json in payloads)
         {
             using var doc = JsonDocument.Parse(json);
             foreach (var q in def.Questions)
             {
                 if (!TryPart(doc.RootElement, q.Key, out var part)) continue;
-                questions[q.Key]++;
                 seen.Clear();
                 switch (q.Type)
                 {
@@ -230,6 +241,8 @@ public static class PollJson
                     default:
                         throw new ArgumentOutOfRangeException(nameof(def), q.Type, null);
                 }
+                // An empty ranked, points or dates part of a structured poll is no answer (HasAnswer); seen is empty then.
+                if (simple || seen.Count > 0 || q.Type is PollType.Choice or PollType.Text or PollType.Number) questions[q.Key]++;
                 var counts = options[q.Key];
                 foreach (var k in seen) if (counts.TryGetValue(k, out var n)) counts[k] = n + 1;
             }
