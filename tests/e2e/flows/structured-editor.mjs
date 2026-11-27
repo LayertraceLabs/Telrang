@@ -41,6 +41,22 @@ async function options(page, labels) {
   }
 }
 
+/**
+ * Add group / Add page from the simple editor: the click that turns it into the structured one. On a slow CI runner the
+ * click was once lost (no outline 15 s later, nothing in the server log); while there is still no outline nothing was
+ * added, so it is clicked once more.
+ */
+export async function addFromSimple(page, text) {
+  await page.interactive();
+  await page.clickText(text, '.editor-addbar button');
+  const outlined = `!!document.querySelector('.editor-outline')`;
+  if (!(await page.waitFor(outlined, 'the outline', 8000).then(() => true, () => false))) {
+    await page.interactive();
+    await page.clickText(text, '.editor-addbar button');
+    await page.waitFor(outlined, 'the outline');
+  }
+}
+
 async function type(page, label, group = 'Question type') {
   await page.clickText(label, `[aria-label="${group}"] label`);
 }
@@ -59,8 +75,7 @@ export async function buildSurvey(page, title, { check = () => { } } = {}) {
   check('simple editor: the add bar', await page.eval(`['Add question', 'Add group', 'Add page'].every(t => [...document.querySelectorAll('.editor-addbar button')].some(b => b.textContent.trim() === t))`));
 
   // Add group: the structured editor, a group after the question, its new question selected.
-  await page.clickText('Add group', '.editor-addbar button');
-  await page.waitFor(`!!document.querySelector('.editor-outline')`, 'the outline');
+  await addFromSimple(page, 'Add group');
   await waitPlace(page, 'Group: Group 1 · Question 2 of 2');
   check('add group: the first question takes the title', await page.eval(`[...document.querySelectorAll('.outline-label')].some(l => l.textContent.trim() === ${JSON.stringify(title)})`));
   check('add group: the tabs', await page.eval(`[...document.querySelectorAll('[role=tab]')].map(t => t.textContent.trim()).join('|') === 'Questions|Voting and results|Look|Preview'`));
