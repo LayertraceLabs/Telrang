@@ -130,14 +130,15 @@ public static class ResponseAnswers
         ArgumentNullException.ThrowIfNull(def);
         ArgumentNullException.ThrowIfNull(answers);
         var parts = new List<KeyValuePair<string, JsonNode>>();
+        var simple = VoteLayout.IsSimple(def); // a simple poll keeps an empty ballot (a voter, as before 0.4)
         foreach (var q in def.Questions)
         {
             if (Normalize(q, answers.GetValueOrDefault(q.Key)) is not { } a) continue;
             JsonNode? node = q.Type switch
             {
-                PollType.Ranked => PollJson.RankedNode(a.Ranked!),
-                PollType.Points => PollJson.PointsNode(a.Points!),
-                PollType.Dates => PollJson.DatesNode(a.Dates!),
+                PollType.Ranked => simple || PollJson.HasAnswer(a.Ranked!) ? PollJson.RankedNode(a.Ranked!) : null,
+                PollType.Points => simple || PollJson.HasAnswer(a.Points!) ? PollJson.PointsNode(a.Points!) : null,
+                PollType.Dates => simple || PollJson.HasAnswer(a.Dates!) ? PollJson.DatesNode(a.Dates!) : null,
                 PollType.Choice => a.Choice!.Keys.Count > 0 || a.Choice.Other ? PollJson.ChoiceNode(a.Choice) : null,
                 PollType.Text => PollJson.TextNode(),
                 PollType.Number => PollJson.NumberNode(a.Number!),

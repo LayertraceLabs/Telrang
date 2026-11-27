@@ -469,6 +469,7 @@ public sealed class ResultsService(IDbContextFactory<ApplicationDbContext> dbFac
                         {
                             if (!has && !simple) break;
                             var b = known[i].Filter(has ? PollJson.RankedFrom(part) : new RankedBallot([], []));
+                            if (!simple && !PollJson.HasAnswer(b)) break; // DESIGN.md §34.3: an empty part is not answered
                             ranked[i].Add(b);
                             foreach (var k in b.Banned) cells[o + index[i][k]] = -1;
                             for (var r = 0; r < b.Ranked.Count; r++) cells[o + index[i][b.Ranked[r]]] = r + 1;
@@ -478,6 +479,7 @@ public sealed class ResultsService(IDbContextFactory<ApplicationDbContext> dbFac
                         {
                             if (!has && !simple) break;
                             var b = known[i].Filter(has ? PollJson.PointsFrom(part) : new PointsBallot(new Dictionary<string, int>()));
+                            if (!simple && !PollJson.HasAnswer(b)) break; // DESIGN.md §34.3: an empty part is not answered
                             points[i].Add(b);
                             foreach (var (k, v) in b.Points) cells[o + index[i][k]] = v;
                             break;
@@ -486,6 +488,7 @@ public sealed class ResultsService(IDbContextFactory<ApplicationDbContext> dbFac
                         {
                             if (!has && !simple) break;
                             var b = known[i].Filter(has ? PollJson.DatesFrom(part) : new DatesBallot(new Dictionary<string, Availability>()));
+                            if (!simple && !PollJson.HasAnswer(b)) break; // DESIGN.md §34.3: an empty part is not answered
                             dates[i].Add(b);
                             foreach (var (k, v) in b.Answers) cells[o + index[i][k]] = (int)v;
                             break;

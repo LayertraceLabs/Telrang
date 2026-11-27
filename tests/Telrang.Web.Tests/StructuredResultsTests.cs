@@ -190,6 +190,35 @@ public class StructuredResultsTests
         Assert.Equal(2, reads.Unprotects); // Ann's and Bob's texts; the response without text has none
     }
 
+    [Fact]
+    public async Task A_skipped_ranked_question_is_not_answered_though_the_form_sends_an_empty_ballot()
+    {
+        await using var factory = new AppFactory();
+        var owner = await CreateUserAsync(factory, "o@example.com");
+        var id = await CreatePollAsync(factory, owner, OpenSurvey());
+        // What the vote form makes of an untouched ranked question: an empty ballot, not a missing answer.
+        await SubmitAsync(factory, id, Ann, Answers(
+            ("q1", new QuestionAnswer { Choice = new ChoiceBallot(["yes"]) }),
+            ("q5", new QuestionAnswer { Ranked = new RankedBallot([], []) })), null);
+        await SubmitAsync(factory, id, Bob, Answers(
+            ("q1", new QuestionAnswer { Choice = new ChoiceBallot(["no"]) }),
+            ("q5", new QuestionAnswer { Ranked = new RankedBallot(["soup"], []) })), null);
+        Assert.DoesNotContain(await BallotsAsync(factory, id), b => b.PayloadJson.Contains("\"q5\":{\"ranked\":[]", StringComparison.Ordinal));
+
+        var r = await WithScope(factory, async sp => await sp.GetRequiredService<ResultsService>().ComputeAsync(await AccessAsync(factory, id, VisitorContext.ForUser(owner))));
+        Assert.Equal(2, r.VoterCount);
+        Assert.Equal(1, r.Questions[4].Ranked!.VoterCount);
+
+        // Parts stored empty by 0.4.0-rc builds read as not answered too, in the results and the change log counts;
+        // a simple poll still counts an empty ballot as a voter.
+        var def = (await AccessAsync(factory, id, VisitorContext.ForUser(owner))).Definition;
+        var counts = PollJson.CountAnswers(["{\"q1\":{\"keys\":[\"yes\"]},\"q5\":{\"ranked\":[],\"banned\":[]}}"], def);
+        Assert.Equal(0, counts.Questions["q5"]);
+        Assert.Equal(1, counts.Questions["q1"]);
+        var simpleDef = def with { Questions = [def.Questions[4] with { Page = null, Group = null }], Pages = [], Groups = [] };
+        Assert.Equal(1, PollJson.CountAnswers(["{\"q5\":{\"ranked\":[],\"banned\":[]}}"], simpleDef).Questions["q5"]);
+    }
+
     private static void ResultsCacheDrop(AppFactory factory, string id)
     {
         Assert.True(Telrang.Core.Ids.PollId.TryDecode(id, out var raw));
